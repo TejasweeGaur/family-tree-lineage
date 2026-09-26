@@ -1,0 +1,671 @@
+import React, { useRef } from 'react';
+import { useTreeStore } from '../store/useTreeStore';
+import { palette } from '../utils/palette';
+import { lifeDates, lifeSpanLong, ageLabel, fmtDate, shortDate } from '../utils/dates';
+import { initials, fullName, parentsOf, siblingsOf, unionsOf, kinSentence, kinPath } from '../utils/kinship';
+import { renderMarkdown } from '../utils/markdown';
+import { readSquarePhoto } from '../utils/image';
+import type { Person, Union } from '../types';
+
+type Data = { persons: Person[]; unions: Union[] };
+
+export function ProfilePanel() {
+  const store = useTreeStore();
+  const { panel, panelTab, panelMode, persons, unions } = store;
+
+  if (!panel) return null;
+
+  const person = persons.find(p => p.id === panel);
+  if (!person) return null;
+
+  const data: Data = { persons, unions };
+  const isDrawer = panelMode === 'drawer';
+
+  // Panel positioning
+  const panelStyle: React.CSSProperties = isDrawer
+    ? { position: 'absolute', top: 0, bottom: 0, right: 0, left: 'auto', width: 540, borderRadius: '20px 0 0 20px' }
+    : { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(880px, 96vw)', maxHeight: '90vh', borderRadius: 20 };
+
+  const tabs = [
+    { key: 'archives' as const, label: 'Historical Archives', count: person.archives.length },
+    { key: 'family' as const, label: 'Direct Family Line', count: null },
+    { key: 'bio' as const, label: 'Biography & Media', count: person.media.length + (person.bio ? 1 : 0) },
+  ];
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70 }}>
+      {/* Backdrop */}
+      <div
+        onClick={store.closePanel}
+        style={{ position: 'absolute', inset: 0, background: 'rgba(41,37,36,.28)', backdropFilter: 'blur(3px)' }}
+      />
+
+      {/* Panel */}
+      <div
+        role="dialog"
+        aria-label="Ancestry record"
+        style={{
+          ...panelStyle,
+          background: '#FFFDFB',
+          boxShadow: '0 30px 80px rgba(28,25,23,.28)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '13px 20px', borderBottom: '1px solid #EFE9E2' }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.14em', color: '#A8A29E' }}>ANCESTRY RECORD</span>
+          <button type="button" onClick={store.togglePanelMode} aria-label="Switch presentation" style={iconBtn}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+              <path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5" />
+            </svg>
+          </button>
+          <button type="button" onClick={store.closePanel} aria-label="Close" style={iconBtn}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {/* Hero */}
+          <HeroSection person={person} data={data} />
+
+          {/* Tabs */}
+          <div style={{
+            display: 'flex', gap: 4, padding: '0 20px', borderBottom: '1px solid #EFE9E2',
+            position: 'sticky', top: 0, background: '#FFFDFB', zIndex: 2, overflowX: 'auto',
+          }}>
+            {tabs.map(tb => (
+              <button
+                key={tb.key}
+                type="button"
+                onClick={() => store.setPanelTab(tb.key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7, padding: '13px 12px',
+                  border: 'none', borderBottom: `2px solid ${panelTab === tb.key ? '#C2410C' : 'transparent'}`,
+                  background: 'none', cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: 700,
+                  color: panelTab === tb.key ? '#C2410C' : '#78716C',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tb.label}
+                {tb.count !== null && tb.count > 0 && (
+                  <span style={{
+                    padding: '2px 7px', borderRadius: 99,
+                    background: panelTab === tb.key ? '#FEF6F1' : '#F5F1EC',
+                    fontSize: 10.5, fontWeight: 800,
+                    color: panelTab === tb.key ? '#C2410C' : '#78716C',
+                  }}>
+                    {tb.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          {panelTab === 'archives' && <ArchivesTab person={person} />}
+          {panelTab === 'family' && <FamilyTab person={person} data={data} />}
+          {panelTab === 'bio' && <BioTab person={person} data={data} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const iconBtn: React.CSSProperties = {
+  marginLeft: 'auto', width: 32, height: 32, borderRadius: 9,
+  border: '1px solid #E7E2DC', background: '#fff', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#57534E',
+};
+
+function HeroSection({ person }: { person: Person; data: Data }) {
+  const isAdmin = useTreeStore(s => s.isAdmin());
+  const openEdit = useTreeStore(s => s.openEdit);
+  const openArchiveForm = useTreeStore(s => s.openArchiveForm);
+  const setPhoto = useTreeStore(s => s.setPhoto);
+  const setNotice = useTreeStore(s => s.setNotice);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const c = palette(person.gender);
+
+  const pickPhoto = async (file?: File) => {
+    if (!file) return;
+    try {
+      setPhoto(person.id, await readSquarePhoto(file));
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not read that image.');
+    }
+  };
+  const heroBg = person.gender === 'Male' ? '#EFF9FF' : person.gender === 'Female' ? '#FDF1F8' : '#F9F9F8';
+
+  return (
+    <div style={{ padding: '22px 24px 20px', background: heroBg, borderBottom: '1px solid rgba(28,25,23,.07)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
+        {/* Avatar — admins get a camera overlay on hover to swap the photo */}
+        <div
+          className={isAdmin ? 'avatar-editable' : undefined}
+          onClick={isAdmin ? () => fileRef.current?.click() : undefined}
+          style={{
+            width: 82, height: 82, borderRadius: '50%', flexShrink: 0,
+            background: person.photoUrl ? 'transparent' : c.avFill,
+            boxShadow: '0 0 0 4px #fff, 0 3px 10px rgba(28,25,23,.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+            overflow: 'hidden', cursor: isAdmin ? 'pointer' : 'default',
+          }}
+        >
+          {person.photoUrl
+            ? <img src={person.photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
+            : <span style={{ fontSize: 26, fontWeight: 800, color: c.avText }}>{initials(person)}</span>
+          }
+          {isAdmin && (
+            <span className="avatar-camera" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.2" />
+              </svg>
+            </span>
+          )}
+          <span style={{
+            position: 'absolute', bottom: 0, right: 0,
+            width: 26, height: 26, borderRadius: '50%',
+            background: '#fff', border: `1.5px solid ${c.border}`,
+            color: c.accent, fontSize: 14, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {c.glyph}
+          </span>
+        </div>
+        {isAdmin && (
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={e => { void pickPhoto(e.target.files?.[0]); e.target.value = ''; }}
+          />
+        )}
+
+        {/* Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}>
+            <span style={{ padding: '4px 11px', borderRadius: 99, background: c.pillBg, color: c.pillColor, fontSize: 11, fontWeight: 700 }}>
+              {person.label}
+            </span>
+            {person.dod && (
+              <span style={{ padding: '4px 10px', borderRadius: 99, background: '#F0EDE9', color: '#78716C', fontSize: 10.5, fontWeight: 700 }}>Deceased</span>
+            )}
+            <span style={{ padding: '4px 10px', borderRadius: 99, border: '1px solid rgba(28,25,23,.18)', color: '#57534E', fontSize: 10.5, fontWeight: 700 }}>
+              {ageLabel(person.dob, person.dod)}
+            </span>
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.022em', marginTop: 8, lineHeight: 1.15 }}>
+            {fullName(person)}
+          </div>
+          {person.maiden && (
+            <div style={{ fontSize: 13, fontStyle: 'italic', color: '#8A817A', marginTop: 1 }}>née {person.maiden}</div>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 10 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: '#57534E' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8 3v4M16 3v4M4 10h16" />
+              </svg>
+              {lifeSpanLong(person.dob, person.dod)}
+            </span>
+            {person.pob && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: '#57534E' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z" /><circle cx="12" cy="10" r="2.4" />
+                </svg>
+                {person.pob}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {isAdmin && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
+          <button type="button" onClick={() => openEdit(person.id)} style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
+            borderRadius: 10, border: '1px solid rgba(28,25,23,.18)',
+            background: 'rgba(255,255,255,.7)', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#292524',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round">
+              <path d="M4 20h4L20 8l-4-4L4 16z" />
+            </svg>
+            Edit Details
+          </button>
+          <button type="button" onClick={() => openArchiveForm(person.id)} style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
+            borderRadius: 10, border: 'none', background: '#C2410C',
+            cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#fff',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+              <path d="M12 16V4M8 8l4-4 4 4M4 16v4h16v-4" />
+            </svg>
+            Upload Archives
+          </button>
+          {person.photoUrl && (
+            <button
+              type="button"
+              onClick={() => setPhoto(person.id, null)}
+              style={{
+                border: 'none', background: 'none', padding: '9px 4px', cursor: 'pointer',
+                fontSize: 12.5, fontWeight: 700, color: '#B91C1C', fontFamily: 'inherit',
+              }}
+            >
+              Remove photo
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArchivesTab({ person }: { person: Person }) {
+  const admin = useTreeStore(s => s.isAdmin());
+  const openArchiveForm = useTreeStore(s => s.openArchiveForm);
+  const openViewer = useTreeStore(s => s.openViewer);
+
+  return (
+    <div style={{ padding: '20px 24px 28px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 15 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: '-0.012em' }}>Historical Records & Vintage Scans</div>
+          <div style={{ fontSize: 12, color: '#8A817A', marginTop: 2 }}>Deeds, certificates, letters and portraits attached to this person.</div>
+        </div>
+        {admin && (
+          <button type="button" onClick={() => openArchiveForm(person.id)} style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 13px', borderRadius: 9, border: '1px solid #FCD34D',
+            background: '#FEF3C7', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#92400E',
+          }}>
+            + Add Record
+          </button>
+        )}
+      </div>
+
+      {person.archives.length === 0 && (
+        <div style={{ padding: '32px 0', textAlign: 'center', color: '#A8A29E', fontSize: 13, fontWeight: 600 }}>
+          No records archived yet.
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', gap: 14 }}>
+        {person.archives.map(a => (
+          <div key={a.id} style={{ border: '1px solid #E7E2DC', borderRadius: 14, overflow: 'hidden', background: '#fff' }}>
+            <div style={{
+              height: 118, position: 'relative',
+              backgroundColor: '#F7F3ED',
+              backgroundImage: 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10, color: '#A8A29E', letterSpacing: '.04em' }}>
+                document scan
+              </span>
+              <span style={{
+                position: 'absolute', top: 9, left: 9,
+                padding: '3px 8px', borderRadius: 6,
+                background: '#1C1917', color: '#fff', fontSize: 10.5, fontWeight: 800,
+              }}>
+                {a.year}
+              </span>
+            </div>
+            <div style={{ padding: '12px 13px' }}>
+              <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.3 }}>{a.title}</div>
+              <div style={{
+                fontSize: 11.5, color: '#78716C', lineHeight: 1.45, marginTop: 5,
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+              }}>
+                {a.desc}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 11, paddingTop: 10, borderTop: '1px solid #F3EFEA' }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: '#A8A29E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.category}
+                </span>
+                <button type="button" onClick={() => openViewer({ title: a.title, sub: `${a.category} · ${a.origin}`, kind: 'document scan' })}
+                  style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C', whiteSpace: 'nowrap' }}>
+                  View &gt;
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]; unions: any[] } }) {
+  const admin = useTreeStore(s => s.isAdmin());
+  const kinTarget = useTreeStore(s => s.kinTarget);
+  const openPanel = useTreeStore(s => s.openPanel);
+  const openAdd = useTreeStore(s => s.openAdd);
+  const setKinTarget = useTreeStore(s => s.setKinTarget);
+  const persons = useTreeStore(s => s.persons);
+
+  const parents = parentsOf(data, person.id);
+  const father = parents.map(id => persons.find(p => p.id === id)).find(p => p?.gender === 'Male');
+  const mother = parents.map(id => persons.find(p => p.id === id)).find(p => p?.gender === 'Female');
+  const spouses = unionsOf(data, person.id).map(u => {
+    const otherId = u.a === person.id ? u.b : u.a;
+    return otherId ? persons.find(p => p.id === otherId) : null;
+  }).filter(Boolean) as Person[];
+  const unionMap = Object.fromEntries(
+    unionsOf(data, person.id).map(u => {
+      const otherId = u.a === person.id ? u.b : u.a;
+      return [otherId || '', u];
+    })
+  );
+  const siblings = siblingsOf(data, person.id).map(id => persons.find(p => p.id === id)).filter(Boolean) as Person[];
+  const children = unionsOf(data, person.id).flatMap(u => u.children).map(id => persons.find(p => p.id === id)).filter(Boolean) as Person[];
+
+  const others = persons.filter(p => p.id !== person.id);
+  const kt = kinTarget && persons.find(p => p.id === kinTarget);
+  const kinAnswer = kt
+    ? (kinSentence(data, person.id, kinTarget) || 'No direct relationship found.')
+    : '';
+  const path = kt ? kinPath(data, person.id, kinTarget) : [];
+
+  return (
+    <div style={{ padding: '20px 24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {/* Parents */}
+      <SectionHeader label="PARENTS" actionLabel={admin ? '+ Add Parent' : undefined} onAction={() => openAdd(person.id, 'Father')} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: -14 }}>
+        {father
+          ? <MiniCard person={father} onClick={() => openPanel(father.id)} />
+          : person.originFather
+            ? <OriginCard name={person.originFather} dates={person.originFatherDates} gender="Male" />
+            : <EmptyCard label="Father not documented" />}
+        {mother
+          ? <MiniCard person={mother} onClick={() => openPanel(mother.id)} />
+          : person.originMother
+            ? <OriginCard name={person.originMother} dates={person.originMotherDates} gender="Female" />
+            : <EmptyCard label="Mother not documented" />}
+      </div>
+
+      {/* Spouse */}
+      <div>
+        <SectionHeader label="SPOUSE / PARTNER" actionLabel={admin ? '+ Add Spouse' : undefined} onAction={() => openAdd(person.id, 'Wife')} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 10 }}>
+          {spouses.length === 0 && <EmptyCard label="No spouse recorded" />}
+          {spouses.map(sp => {
+            const u = unionMap[sp.id];
+            const c = palette(sp.gender);
+            return (
+              <div key={sp.id} onClick={() => openPanel(sp.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: 12,
+                borderRadius: 12, border: `1px solid ${c.border}`, background: c.fill, cursor: 'pointer',
+              }}>
+                <span style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0, background: c.avFill, color: c.avText, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800 }}>
+                  {initials(sp)}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700 }}>{fullName(sp)}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: c.accent }}>{lifeDates(sp.dob, sp.dod)}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: '#78716C', marginTop: 1 }}>
+                    {u?.date ? `Married ${shortDate(u.date)}` : 'Marriage date not recorded'}
+                  </span>
+                </span>
+                {admin && (
+                  <button type="button" onClick={e => { e.stopPropagation(); }} style={{
+                    flexShrink: 0, padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(28,25,23,.14)',
+                    background: 'rgba(255,255,255,.7)', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#78716C',
+                  }}>Unlink</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Siblings */}
+      {siblings.length > 0 && (
+        <div>
+          <SectionHeader label="SIBLINGS" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 9, marginTop: 10 }}>
+            {siblings.map(s => <MiniCard key={s.id} person={s} onClick={() => openPanel(s.id)} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Children */}
+      <div>
+        <SectionHeader label={`CHILDREN (${children.length})`} actionLabel={admin ? '+ Add Child' : undefined} onAction={() => openAdd(person.id, 'Son')} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 9, marginTop: 10 }}>
+          {children.map(ch => <MiniCard key={ch.id} person={ch} onClick={() => openPanel(ch.id)} />)}
+        </div>
+      </div>
+
+      {/* Kinship explainer */}
+      <div style={{ border: '1px solid #FCD34D', background: '#FFFBEB', borderRadius: 16, padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.012em' }}>Kinship Relationship Explainer</span>
+          <span style={{ padding: '3px 9px', borderRadius: 99, background: '#FDE68A', color: '#92400E', fontSize: 10, fontWeight: 800, letterSpacing: '.04em' }}>Lineage Checker</span>
+        </div>
+        <select value={kinTarget} onChange={e => setKinTarget(e.target.value)} style={{
+          width: '100%', padding: '9px 11px', borderRadius: 10, border: '1px solid #FCD34D',
+          background: '#fff', fontSize: 12.5, fontWeight: 600, color: '#44403C',
+        }}>
+          {others.map(o => (
+            <option key={o.id} value={o.id}>{fullName(o)}</option>
+          ))}
+        </select>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#78350F', marginTop: 12, lineHeight: 1.5 }}>{kinAnswer}</div>
+        {path.length > 1 && (
+          <div style={{
+            fontSize: 11.5, color: '#92400E', marginTop: 6,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          }}>
+            {path.join('  →  ')}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BioTab({ person, data }: { person: Person; data: { persons: Person[]; unions: any[] } }) {
+  const admin = useTreeStore(s => s.isAdmin());
+  const openEdit = useTreeStore(s => s.openEdit);
+  const openViewer = useTreeStore(s => s.openViewer);
+  const panelMode = useTreeStore(s => s.panelMode);
+  const tileCols = panelMode === 'modal' ? 4 : 2;
+
+  // Timeline
+  const timelineItems: Array<{ date: string; dot: string; title: string; sub: string }> = [];
+  if (person.dob) timelineItems.push({ date: person.dob, dot: '#C2410C', title: 'Born', sub: fmtDate(person.dob) + (person.pob ? ` · ${person.pob}` : '') });
+  unionsOf(data, person.id).forEach(u => {
+    const sp = u.a === person.id ? data.persons.find(p => p.id === u.b) : data.persons.find(p => p.id === u.a);
+    if (u.date) timelineItems.push({ date: u.date, dot: '#DB2777', title: `Married ${sp ? fullName(sp) : ''}`, sub: fmtDate(u.date) + (u.place ? ` · ${u.place}` : '') });
+    u.children.forEach(cid => {
+      const ch = data.persons.find(p => p.id === cid);
+      if (ch?.dob) timelineItems.push({ date: ch.dob, dot: '#38BDF8', title: `Birth of ${fullName(ch)}`, sub: fmtDate(ch.dob) + (ch.pob ? ` · ${ch.pob}` : '') });
+    });
+  });
+  person.archives.forEach(a => {
+    if (a.year) timelineItems.push({ date: a.year, dot: '#F59E0B', title: a.title, sub: a.category + (a.origin ? ` · ${a.origin}` : '') });
+  });
+  if (person.dod) timelineItems.push({ date: person.dod, dot: '#1C1917', title: 'Passed away', sub: fmtDate(person.dod) + (person.pod ? ` · ${person.pod}` : '') });
+  timelineItems.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  const infoTiles = [
+    { label: 'OCCUPATION / CAREER', value: person.occupation || '—' },
+    { label: 'PRIMARY HERITAGE RESIDENCY', value: person.residency || '—' },
+    { label: 'BIRTH DATE & PLACE', value: person.dob ? `${fmtDate(person.dob)}${person.pob ? ` · ${person.pob}` : ''}` : '—' },
+    { label: 'PASSING DATE & PLACE', value: person.dod ? `${fmtDate(person.dod)}${person.pod ? ` · ${person.pod}` : ''}` : person.dob ? 'Living' : '—' },
+    { label: 'GOTRA', value: person.gotra || 'Not documented' },
+    { label: 'SHASAN', value: person.shasan || 'Not documented' },
+  ];
+
+  return (
+    <div style={{ padding: '20px 24px 28px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Biography */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E' }}>LIFE STORY & HERITAGE BIOGRAPHY</span>
+          {admin && (
+            <button type="button" onClick={() => openEdit(person.id)} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C' }}>
+              Edit Biography
+            </button>
+          )}
+        </div>
+        <div style={{ border: '1px solid #E7E2DC', borderRadius: 14, background: '#fff', padding: '16px 18px', fontSize: 13.5, lineHeight: 1.65, color: '#292524' }}>
+          {person.bio
+            ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(person.bio) }} />
+            : <span style={{ color: '#A8A29E', fontStyle: 'italic' }}>No biography recorded yet.</span>
+          }
+        </div>
+      </div>
+
+      {/* Media gallery */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E' }}>LIFE MEDIA GALLERY ({person.media.length})</span>
+          {admin && (
+            <button type="button" onClick={() => openEdit(person.id)} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C' }}>
+              + Manage Media
+            </button>
+          )}
+        </div>
+        {person.media.length === 0 ? (
+          <div style={{ border: '2px dashed #E2DBD2', borderRadius: 14, padding: 26, textAlign: 'center', background: '#FAF8F5' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#8A817A' }}>No media uploaded yet</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 11 }}>
+            {person.media.map(m => (
+              <button key={m.id} type="button" onClick={() => openViewer({ title: m.title, sub: `${m.type} · ${m.size}`, kind: m.type })} style={{
+                position: 'relative', height: 126, borderRadius: 12, overflow: 'hidden',
+                border: '1px solid #E7E2DC', cursor: 'pointer', padding: 0,
+                backgroundColor: '#F7F3ED',
+                backgroundImage: 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
+              }}>
+                <span style={{ position: 'absolute', top: 8, left: 8, padding: '3px 8px', borderRadius: 99, background: 'rgba(255,255,255,.92)', fontSize: 9.5, fontWeight: 800, color: '#57534E' }}>
+                  {m.type}
+                </span>
+                {m.type === 'Video Clip' && (
+                  <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 36, height: 36, borderRadius: '50%', background: '#C2410C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><path d="M8 5l12 7-12 7z" /></svg>
+                  </span>
+                )}
+                <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 9px 8px', background: 'linear-gradient(transparent,rgba(28,25,23,.78))', textAlign: 'left' }}>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+                  <span style={{ display: 'block', fontSize: 10, color: 'rgba(255,255,255,.82)' }}>{m.size}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Info tiles — the wider modal fits four across, the drawer only two */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tileCols},minmax(0,1fr))`, gap: 11 }}>
+        {infoTiles.map(t => (
+          <div key={t.label} style={{ border: '1px solid #E7E2DC', borderRadius: 13, background: '#fff', padding: '13px 14px' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.11em', color: '#A8A29E' }}>{t.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#292524', marginTop: 6, lineHeight: 1.4 }}>{t.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Timeline */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E', marginBottom: 14 }}>LIFE MILESTONES CHRONOLOGY</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {timelineItems.map((e, i) => (
+            <div key={i} style={{ display: 'flex', gap: 14 }}>
+              <div style={{ flexShrink: 0, width: 46, textAlign: 'right', fontSize: 11.5, fontWeight: 800, color: '#A8A29E', paddingTop: 1 }}>
+                {e.date.slice(0, 4)}
+              </div>
+              <div style={{ flexShrink: 0, width: 12, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: e.dot, boxShadow: '0 0 0 3px #FFFDFB', marginTop: 4 }} />
+                {i < timelineItems.length - 1 && <span style={{ flex: 1, width: 2, background: '#EFE9E2' }} />}
+              </div>
+              <div style={{ flex: 1, paddingBottom: 16, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.35 }}>{e.title}</div>
+                <div style={{ fontSize: 11.5, color: '#8A817A', marginTop: 2 }}>{e.sub}</div>
+              </div>
+            </div>
+          ))}
+          {timelineItems.length === 0 && (
+            <div style={{ color: '#A8A29E', fontSize: 13, fontStyle: 'italic', paddingLeft: 60 }}>No milestones recorded yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ label, actionLabel, onAction }: { label: string; actionLabel?: string; onAction?: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E' }}>{label}</span>
+      {actionLabel && (
+        <button type="button" onClick={onAction} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C' }}>
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MiniCard({ person, onClick }: { person: Person; onClick: () => void }) {
+  const c = palette(person.gender);
+  return (
+    <button type="button" onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 10, padding: 10,
+      borderRadius: 12, border: `1px solid ${c.border}`, background: c.fill, cursor: 'pointer', textAlign: 'left',
+    }}>
+      <span style={{ width: 34, height: 34, borderRadius: '50%', flexShrink: 0, background: c.avFill, color: c.avText, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800 }}>
+        {initials(person)}
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fullName(person)}</span>
+        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: c.accent }}>{lifeDates(person.dob, person.dod)}</span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * A parent recorded only as origin-family text. Married-in people's parents
+ * aren't drawn in the tree, so there's nothing to navigate to — hence no click.
+ */
+function OriginCard({ name, dates, gender }: { name: string; dates: string; gender: 'Male' | 'Female' }) {
+  const c = palette(gender);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, padding: 10,
+      borderRadius: 12, border: `1px solid ${c.border}`, background: c.fill,
+    }}>
+      <span style={{
+        width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+        background: c.avFill, color: c.avText,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 12, fontWeight: 800,
+      }}>
+        {name.split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {name}
+        </span>
+        {dates && <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: c.accent }}>{dates}</span>}
+        <span style={{ display: 'block', fontSize: 10.5, color: '#78716C', marginTop: 1 }}>
+          Origin family · not in tree
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function EmptyCard({ label }: { label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, border: '1.5px dashed #D6CFC7', color: '#A8A29E', fontSize: 12, fontWeight: 600 }}>
+      {label}
+    </div>
+  );
+}

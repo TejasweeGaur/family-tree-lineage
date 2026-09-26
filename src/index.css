@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: #1C1917;
+  background: #F7F5F2;
+  margin: 0;
+}
+
+/* Canvas dot grid */
+.canvas-bg {
+  background-color: #F7F5F2;
+  background-image: radial-gradient(#DED7CE 1.1px, transparent 1.1px);
+  background-size: 22px 22px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D6CFC7; border-radius: 3px; }
+
+/* Profile avatar: admins get a camera strip on hover to swap the photo. */
+.avatar-editable::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(28, 25, 23, 0.28);
+  opacity: 0;
+  transition: opacity 0.16s;
+}
+.avatar-editable:hover::after { opacity: 1; }
+
+.avatar-camera {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(28, 25, 23, 0.62);
+  opacity: 0;
+  transition: opacity 0.16s;
+  z-index: 1;
+}
+.avatar-editable:hover .avatar-camera { opacity: 1; }
+
+/* Keyboard focus ring, per the design tokens. */
+:focus-visible {
+  outline: 2px solid #C2410C;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
