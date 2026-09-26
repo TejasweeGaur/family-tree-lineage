@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { palette } from '../utils/palette';
 import { lifeDates, lifeSpanLong, ageLabel, fmtDate, shortDate } from '../utils/dates';
@@ -6,7 +6,7 @@ import { initials, fullName, parentsOf, siblingsOf, unionsOf, kinSentence, kinPa
 import { renderMarkdown } from '../utils/markdown';
 import { readSquarePhoto } from '../utils/image';
 import { useSignedUrl } from '../hooks/useSignedUrl';
-import type { Person, Union } from '../types';
+import type { Person, Union, Archive, ViewerRecord } from '../types';
 
 type Data = { persons: Person[]; unions: Union[] };
 
@@ -574,6 +574,95 @@ function SectionHeader({ label, actionLabel, onAction }: { label: string; action
           {actionLabel}
         </button>
       )}
+    </div>
+  );
+}
+
+function ArchiveCard({
+  a, personId, admin, onView,
+}: {
+  a: Archive;
+  personId: string;
+  admin: boolean;
+  onView: (r: ViewerRecord) => void;
+}) {
+  const deleteArchive = useTreeStore(s => s.deleteArchive);
+  const [confirming, setConfirming] = useState(false);
+  const thumb = useSignedUrl(a.filePath);
+  const isPdf = /\.pdf$/i.test(a.fileName ?? '');
+
+  return (
+    <div style={{ border: '1px solid #E7E2DC', borderRadius: 14, overflow: 'hidden', background: '#fff' }}>
+      <div style={{
+        height: 118, position: 'relative',
+        backgroundColor: '#F7F3ED',
+        backgroundImage: thumb && !isPdf ? undefined : 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {thumb && !isPdf ? (
+          <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10, color: '#A8A29E', letterSpacing: '.04em' }}>
+            {a.filePath ? (isPdf ? 'PDF' : 'document scan') : 'no file attached'}
+          </span>
+        )}
+        {a.year && (
+          <span style={{
+            position: 'absolute', top: 9, left: 9,
+            padding: '3px 8px', borderRadius: 6,
+            background: '#1C1917', color: '#fff', fontSize: 10.5, fontWeight: 800,
+          }}>
+            {a.year}
+          </span>
+        )}
+        {admin && (
+          <button
+            type="button"
+            aria-label={`Delete ${a.title}`}
+            onClick={() => {
+              // Two-step rather than a modal: deleting removes the stored file
+              // and cannot be undone, but a whole dialog per card is heavy.
+              if (confirming) void deleteArchive(personId, a.id);
+              else setConfirming(true);
+            }}
+            onBlur={() => setConfirming(false)}
+            style={{
+              position: 'absolute', top: 8, right: 8,
+              padding: confirming ? '4px 9px' : 0,
+              width: confirming ? 'auto' : 26, height: 26, borderRadius: 8,
+              border: '1px solid #E7E2DC',
+              background: confirming ? '#B91C1C' : 'rgba(255,255,255,.92)',
+              color: confirming ? '#fff' : '#B91C1C',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 800, fontFamily: 'inherit', whiteSpace: 'nowrap',
+            }}
+          >
+            {confirming ? 'Delete?' : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+      <div style={{ padding: '12px 13px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.3 }}>{a.title}</div>
+        <div style={{
+          fontSize: 11.5, color: '#78716C', lineHeight: 1.45, marginTop: 5,
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>
+          {a.desc}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 11, paddingTop: 10, borderTop: '1px solid #F3EFEA' }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: '#A8A29E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {a.category}
+          </span>
+          <button type="button" onClick={() => onView({ title: a.title, sub: `${a.category} · ${a.origin}`, kind: 'document scan', url: a.filePath, fileName: a.fileName })}
+            style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C', whiteSpace: 'nowrap' }}>
+            View &gt;
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
