@@ -15,6 +15,9 @@ export function AddMemberDialog() {
   const confirmAddDialog = useTreeStore(s => s.confirmAddDialog);
 
   if (!addDialog) return null;
+  // openAddDialog routes an empty archive straight to the form; this is a
+  // backstop so the dialog can never render with nothing to relate to.
+  if (!persons.length) return null;
 
   const anchor = persons.find(p => p.id === addDialog.anchorId);
   const data = { persons, unions };

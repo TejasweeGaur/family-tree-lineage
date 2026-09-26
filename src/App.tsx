@@ -13,6 +13,7 @@ import { NewTreeModal } from './components/NewTreeModal';
 import { NoticeToast } from './components/NoticeToast';
 import { PlusMenu } from './components/PlusMenu';
 import { SignInScreen } from './components/SignInScreen';
+import { CreateTreeScreen } from './components/CreateTreeScreen';
 import { AddMemberDialog } from './components/AddMemberDialog';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 
@@ -55,6 +56,8 @@ function App() {
     return <div style={{ height: '100vh', background: '#F7F5F2' }} />;
   }
   if (!session) return <SignInScreen />;
+  // Signed in, but no archive yet — first run.
+  if (!session.treeId) return <CreateTreeScreen />;
 
   const isMobile = winW < 640;
   const gutter = isMobile ? 12 : 20;

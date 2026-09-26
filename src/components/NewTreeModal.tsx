@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
+import { COUNTRY_HINTS } from '../data/countries';
 
 export function NewTreeModal() {
   const store = useTreeStore();
   const { newTreeOpen, setNewTreeOpen, createTree } = store;
   const [name, setName] = useState('');
-  const [notes, setNotes] = useState('');
+  const [place, setPlace] = useState('');
+  const [country, setCountry] = useState('');
 
   if (!newTreeOpen) return null;
 
   const handle = () => {
     if (!name.trim()) return;
-    createTree(name.trim(), notes.trim());
-    setName(''); setNotes('');
+    void createTree(name.trim(), place.trim(), country.trim());
+    setName(''); setPlace(''); setCountry('');
   };
 
   return (
@@ -33,10 +35,19 @@ export function NewTreeModal() {
             <span style={lbl}>Family Name *</span>
             <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder='e.g. "Sharma" becomes "Sharma Family Tree"' />
           </label>
-          <label style={{ display: 'block' }}>
-            <span style={lbl}>Origin notes (optional)</span>
-            <textarea style={{ ...inp, resize: 'vertical' }} rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Where the family originated, founding notes…" />
-          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
+            <label style={{ display: 'block' }}>
+              <span style={lbl}>Ancestral place</span>
+              <input style={inp} value={place} onChange={e => setPlace(e.target.value)} placeholder="e.g. Varanasi" />
+            </label>
+            <label style={{ display: 'block' }}>
+              <span style={lbl}>Country</span>
+              <input style={inp} value={country} onChange={e => setCountry(e.target.value)} list="ft-countries-new" placeholder="e.g. India" />
+              <datalist id="ft-countries-new">
+                {COUNTRY_HINTS.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </label>
+          </div>
           {name && (
             <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF6F1', border: '1px solid #FED7AA', fontSize: 12.5, fontWeight: 600, color: '#C2410C' }}>
               Your tree will be called: <strong>{name} Family Tree</strong>

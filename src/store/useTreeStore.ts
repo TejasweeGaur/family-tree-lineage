@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type {
   Person, Union, Tree, Invite, Session, Role,
   PanelTab, ViewMode, PanelMode, CanvasMode,
-  FormState, FormValues, ArchiveFormState, DirSortKey, Gender,
+  FormState, FormValues, ArchiveFormState, Archive, DirSortKey, Gender,
   RelativeKind, AddDialogState, ViewerRecord,
 } from '../types';
 import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from '../data/seed';
@@ -31,6 +31,7 @@ interface AppState {
   session: Session | null;
   authReady: boolean;
   signingIn: boolean;
+  creatingTree: boolean;
   authError: string;
   pendingInvite: string | null;
 
@@ -38,6 +39,11 @@ interface AppState {
   trees: Tree[];
   activeTreeId: string;
   rootId: string;
+  /**
+   * Per-tree snapshots, parked on switch. Demo mode restores from here because
+   * LocalRepository holds no per-tree data; Supabase re-reads instead.
+   */
+  treeCache: Record<string, { persons: Person[]; unions: Union[]; rootId: string; collapsed: Record<string, boolean> }>;
 
   // People & relationships
   persons: Person[];
@@ -74,13 +80,20 @@ interface AppState {
 
   // Forms & dialogs
   form: FormState | null;
+  /** True while a person write is in flight; blocks double-submit. */
+  savingForm: boolean;
   archiveForm: ArchiveFormState | null;
+  /** True while an archive record (and any file) is being written. */
+  savingArchive: boolean;
   addDialog: AddDialogState | null;
   /** Person queued for deletion, shown in the confirm dialog. */
   confirmDeleteId: string | null;
   inviteOpen: boolean;
   inviteRole: Role;
+  /** Empty until an invite is actually minted and stored. */
   inviteToken: string;
+  creatingInvite: boolean;
+  inviteError: string;
   copied: boolean;
   newTreeOpen: boolean;
   viewerRecord: ViewerRecord | null;
@@ -100,12 +113,6 @@ interface AppState {
 
 function nid(): string {
   return 'n' + Math.random().toString(36).slice(2, 8);
-}
-
-function randomToken(): string {
-  const a = new Uint8Array(9);
-  crypto.getRandomValues(a);
-  return Array.from(a, b => b.toString(36).padStart(2, '0')).join('').slice(0, 14);
 }
 
 function groupOf(kind: string): FormState['group'] {
@@ -128,6 +135,7 @@ function kindLabel(group: string, gender: Gender): string {
     spouse: ['Husband', 'Wife', 'Spouse'],
     parent: ['Father', 'Mother', 'Parent'],
     sibling: ['Brother', 'Sister', 'Sibling'],
+    root: ['Ancestor', 'Ancestor', 'Ancestor'],
   };
   const m = map[group] || ['Relative', 'Relative', 'Relative'];
   return gender === 'Male' ? m[0] : gender === 'Female' ? m[1] : m[2];
@@ -138,13 +146,15 @@ function emptyValues(): FormValues {
     first: '', last: '', maiden: '', gender: 'Other', living: true,
     dob: '', pob: '', dod: '', pod: '',
     occupation: '', residency: '', gotra: '', shasan: '',
-    label: '', bio: '', mdate: '', mplace: '',
+    label: '', bio: '', mdate: '', mplace: '', photo: '',
   };
 }
 
 type Store = AppState & {
   // Auth
   initAuth: () => Promise<void>;
+  loadActiveTree: (treeId: string) => Promise<void>;
+  createFirstTree: (name: string, place: string, country: string) => Promise<void>;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: () => boolean;
@@ -180,6 +190,7 @@ type Store = AppState & {
   setSearchOpen: (v: boolean) => void;
   setPlusMenu: (id: string | null, pos?: { x: number; y: number }) => void;
   closeAllMenus: () => void;
+  closeHeaderMenus: () => void;
 
   // Add Member dialog
   openAddDialog: (anchorId?: string) => void;
@@ -194,7 +205,7 @@ type Store = AppState & {
   closeForm: () => void;
   setFormValue: <K extends keyof FormValues>(key: K, val: FormValues[K]) => void;
   setBioTab: (tab: 'write' | 'preview') => void;
-  saveForm: () => void;
+  saveForm: () => Promise<void>;
 
   // Delete
   askDelete: (id: string) => void;
@@ -207,8 +218,9 @@ type Store = AppState & {
   // Archives
   openArchiveForm: (id: string) => void;
   closeArchiveForm: () => void;
-  setArchiveField: <K extends keyof Omit<ArchiveFormState, 'targetId'>>(key: K, val: string) => void;
-  saveArchive: () => void;
+  setArchiveField: <K extends keyof Omit<ArchiveFormState, 'targetId'>>(key: K, val: ArchiveFormState[K]) => void;
+  saveArchive: () => Promise<void>;
+  deleteArchive: (personId: string, archiveId: string) => Promise<void>;
 
   // Viewer
   openViewer: (record: ViewerRecord) => void;
@@ -217,14 +229,17 @@ type Store = AppState & {
   // Invites
   setInviteOpen: (v: boolean) => void;
   setInviteRole: (r: Role) => void;
-  regenerateInvite: () => void;
+  loadInvites: () => Promise<void>;
+  createInviteLink: () => Promise<void>;
+  revokeInviteToken: (token: string) => Promise<void>;
+  redeemPendingInvite: () => Promise<void>;
   setCopied: (v: boolean) => void;
   inviteUrl: () => string;
 
   // Trees
   setNewTreeOpen: (v: boolean) => void;
-  createTree: (name: string, notes: string) => void;
-  switchTree: (id: string) => void;
+  createTree: (name: string, place: string, country: string) => Promise<void>;
+  switchTree: (id: string) => Promise<void>;
 
   setHeaderQ: (q: string) => void;
   setDirSort: (k: DirSortKey) => void;
@@ -243,12 +258,14 @@ export const useTreeStore = create<Store>((set, get) => ({
   session: null,
   authReady: false,
   signingIn: false,
+  creatingTree: false,
   authError: '',
   pendingInvite: null,
 
-  trees: [{ id: 't1', name: SEED_TREE_NAME, originNotes: 'Founded by Hari Prasad Sharma of Varanasi' }],
+  trees: [{ id: 't1', name: SEED_TREE_NAME, originPlace: 'Varanasi', originCountry: 'India' }],
   activeTreeId: 't1',
   rootId: SEED_ROOT_ID,
+  treeCache: {},
 
   persons: SEED_PERSONS,
   unions: SEED_UNIONS,
@@ -277,12 +294,16 @@ export const useTreeStore = create<Store>((set, get) => ({
   plusPos: { x: 0, y: 0 },
 
   form: null,
+  savingForm: false,
   archiveForm: null,
+  savingArchive: false,
   addDialog: null,
   confirmDeleteId: null,
   inviteOpen: false,
   inviteRole: 'viewer',
-  inviteToken: randomToken(),
+  inviteToken: '',
+  creatingInvite: false,
+  inviteError: '',
   copied: false,
   newTreeOpen: false,
   viewerRecord: null,
@@ -304,24 +325,64 @@ export const useTreeStore = create<Store>((set, get) => ({
     const invite = params.get('invite');
     if (invite) set({ pendingInvite: invite });
 
+    // The store is seeded with demo fixtures for local mode. Against Supabase
+    // that would briefly show one family's data to another, so clear it first.
+    if (repo.kind === 'supabase') {
+      set({ persons: [], unions: [], rootId: '', trees: [], activeTreeId: '', collapsed: {} });
+    }
+
     const session = await repo.getSession();
     set({ session, authReady: true });
 
-    repo.onAuthChange(s => set({ session: s }));
+    repo.onAuthChange(s => {
+      set({ session: s });
+      // A sign-in completing after an OAuth redirect arrives here, not above.
+      if (repo.kind !== 'supabase' || !s) return;
+      // An invite has to be redeemed before loading: until the membership row
+      // exists, RLS returns nothing and the tree looks empty.
+      if (get().pendingInvite) void get().redeemPendingInvite();
+      else if (s.treeId) void get().loadActiveTree(s.treeId);
+    });
 
     if (repo.kind === 'supabase' && session) {
-      try {
-        const snap = await repo.loadTree(get().activeTreeId);
-        const collapsed: Record<string, boolean> = {};
-        snap.unions.forEach(u => { if (u.a !== snap.rootId && u.b !== snap.rootId) collapsed[u.id] = true; });
-        set({
-          persons: snap.persons, unions: snap.unions, rootId: snap.rootId,
-          activeTreeId: snap.treeId, collapsed,
-          trees: [{ id: snap.treeId, name: snap.treeName, originNotes: snap.originNotes }],
-        });
-      } catch (e) {
-        set({ notice: e instanceof Error ? e.message : 'Could not load the family tree.' });
-      }
+      if (get().pendingInvite) await get().redeemPendingInvite();
+      else if (session.treeId) await get().loadActiveTree(session.treeId);
+    }
+  },
+
+  loadActiveTree: async (treeId: string) => {
+    try {
+      const snap = await repo.loadTree(treeId);
+      const collapsed: Record<string, boolean> = {};
+      snap.unions.forEach(u => { if (u.a !== snap.rootId && u.b !== snap.rootId) collapsed[u.id] = true; });
+      set({
+        persons: snap.persons, unions: snap.unions, rootId: snap.rootId,
+        activeTreeId: snap.treeId, collapsed,
+        trees: [{ id: snap.treeId, name: snap.treeName, originPlace: snap.originPlace, originCountry: snap.originCountry }],
+      });
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not load the family tree.' });
+    }
+  },
+
+  /**
+   * First-run bootstrap: an authenticated user with no membership creates their
+   * own archive and becomes its admin. Starts empty — no seed data is copied in.
+   */
+  createFirstTree: async (name: string, place: string, country: string) => {
+    set({ creatingTree: true, authError: '' });
+    try {
+      const treeId = await repo.createTree(name, place, country);
+      set(s => ({
+        session: s.session ? { ...s.session, treeId, role: 'admin' } : s.session,
+        activeTreeId: treeId,
+        persons: [], unions: [], rootId: '', collapsed: {},
+        trees: [{ id: treeId, name, originPlace: place, originCountry: country }],
+      }));
+    } catch (e) {
+      set({ authError: e instanceof Error ? e.message : 'Could not create the archive.' });
+    } finally {
+      set({ creatingTree: false });
     }
   },
 
@@ -431,11 +492,29 @@ export const useTreeStore = create<Store>((set, get) => ({
     dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false,
     showFilters: false, plusMenu: null,
   }),
+  /**
+   * Header dropdowns only. The card's plus menu is deliberately excluded: the
+   * header dismisses on `mousedown`, and clearing plusMenu there unmounted the
+   * menu before its own click could land, so every item in it was dead.
+   * PlusMenu handles its own outside-click.
+   */
+  closeHeaderMenus: () => set({
+    dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false,
+    showFilters: false,
+  }),
 
   // ---------------------------------------------------------------- add dialog
 
   openAddDialog: anchorId => {
     const { panel, focus, persons, rootId } = get();
+    // An empty archive has nobody to relate a new person to. Asking "related to
+    // whom, and how?" is unanswerable, and answering it anyway used to build a
+    // union pointing at an empty id, which broke the layout walk.
+    if (!persons.length) {
+      set({ addDialog: null, plusMenu: null });
+      get().openAdd('', 'Root');
+      return;
+    }
     const anchor = anchorId || panel || focus || rootId || persons[0]?.id || '';
     set({ addDialog: { anchorId: anchor, kind: null }, plusMenu: null });
   },
@@ -464,7 +543,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           ...emptyValues(),
           last: inherits ? (p?.last || '') : '',
           gender,
-          living: group === 'child',
+          living: group === 'child' || group === 'root',
           residency: p?.residency || '',
           gotra: inherits ? (p?.gotra || '') : '',
           shasan: inherits ? (p?.shasan || '') : '',
@@ -489,6 +568,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           gotra: p.gotra, shasan: p.shasan,
           label: p.label, bio: p.bio,
           mdate: u?.date || '', mplace: u?.place || '',
+          photo: p.photoUrl || '',
         },
       },
     });
@@ -501,9 +581,9 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   setBioTab: tab => set(s => s.form ? { form: { ...s.form, bioTab: tab } } : {}),
 
-  saveForm: () => {
-    const { form, persons, unions, collapsed, activeTreeId } = get();
-    if (!form) return;
+  saveForm: async () => {
+    const { form, persons, unions, collapsed, activeTreeId, savingForm } = get();
+    if (!form || savingForm) return; // guard: the writes are awaited now
     const v = form.values;
     if (!v.first.trim() || !v.last.trim()) {
       set({ notice: 'First and last name are required.' });
@@ -514,6 +594,21 @@ export const useTreeStore = create<Store>((set, get) => ({
     const newCollapsed = { ...collapsed };
 
     if (form.mode === 'edit') {
+      const prev = persons.find(p => p.id === form.targetId);
+      let photoUrl = prev?.photoUrl;
+
+      set({ savingForm: true });
+      try {
+        // Only touch storage when the picture actually changed, so re-saving a
+        // profile doesn't upload the same image again.
+        if (v.photo !== (prev?.photoUrl ?? '')) {
+          photoUrl = (await repo.setPhoto(activeTreeId, form.targetId, v.photo || null)) ?? undefined;
+        }
+      } catch (e) {
+        set({ savingForm: false, notice: e instanceof Error ? e.message : 'Could not save the photo.' });
+        return;
+      }
+
       const newPersons = persons.map(p => p.id === form.targetId
         ? {
             ...p,
@@ -522,78 +617,134 @@ export const useTreeStore = create<Store>((set, get) => ({
             dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
             occupation: v.occupation, residency: v.residency,
             gotra: v.gotra, shasan: v.shasan,
-            label: v.label, bio: v.bio,
+            label: v.label, bio: v.bio, photoUrl,
           }
         : p);
       const u = newUnions.find(x => x.a === form.targetId || x.b === form.targetId);
       if (u) { u.date = v.mdate; u.place = v.mplace; }
 
-      set({ persons: newPersons, unions: newUnions, form: null });
+      set({ persons: newPersons, unions: newUnions, form: null, savingForm: false });
       const edited = newPersons.find(p => p.id === form.targetId);
-      if (edited) void repo.updatePerson(edited);
-      if (u) void repo.updateUnion(u);
+      try {
+        if (edited) await repo.updatePerson(edited);
+        if (u) await repo.updateUnion(u);
+      } catch (e) {
+        set({ notice: e instanceof Error ? e.message : 'Could not save those changes.' });
+      }
       return;
     }
 
-    const id = nid();
-    const np: Person = {
-      id, first: v.first, last: v.last, maiden: v.maiden, gender: v.gender,
-      dob: v.dob, pob: v.pob, dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
-      occupation: v.occupation, residency: v.residency,
-      gotra: v.gotra, shasan: v.shasan,
-      label: form.group === 'spouse' ? 'Married in' : kindLabel(form.group, v.gender),
-      bio: v.bio, archives: [], media: [], sample: false,
-      originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',
-    };
-    const newPersons = [...persons, np];
     const t = form.targetId;
 
-    if (form.group === 'spouse') {
-      const u: Union = { id: 'u' + id, a: t, b: id, date: v.mdate, place: v.mplace, children: [] };
-      newUnions.push(u);
-      void repo.createUnion(activeTreeId, u);
-    } else if (form.group === 'child') {
-      let u = newUnions.find(x => x.a === t || x.b === t);
-      if (!u) {
-        u = { id: 'u' + id, a: t, b: null, date: '', place: '', children: [] };
-        newUnions.push(u);
-        void repo.createUnion(activeTreeId, u);
-      }
-      u.children.push(id);
-      newCollapsed[u.id] = false;
-      void repo.addChild(u.id, id);
-    } else if (form.group === 'sibling') {
-      let u = newUnions.find(x => x.children.includes(t));
-      if (!u) {
-        u = { id: 'u' + id, a: null, b: null, date: '', place: '', children: [t] };
-        newUnions.push(u);
-      }
-      u.children.push(id);
-      newCollapsed[u.id] = false;
-      void repo.addChild(u.id, id);
-    } else {
-      // Parent: fill the empty slot on the anchor's parent union.
-      let u = newUnions.find(x => x.children.includes(t));
-      if (!u) {
-        u = { id: 'u' + id, a: id, b: null, date: '', place: '', children: [t] };
-        newUnions.push(u);
-        void repo.createUnion(activeTreeId, u);
-      } else if (!u.a) {
-        u.a = id;
-      } else if (!u.b) {
-        u.b = id;
-      } else {
+    // Checked before anything is written: bailing out afterwards would strand a
+    // person row in the database with no relationship to reach them by.
+    if (form.group === 'parent' && t) {
+      const pu = newUnions.find(x => x.children.includes(t));
+      if (pu && pu.a && pu.b) {
         set({ notice: 'Both parents are already recorded.' });
         return;
       }
-      newCollapsed[u.id] = false;
     }
 
-    void repo.createPerson(activeTreeId, np);
-    set({
-      persons: newPersons, unions: newUnions, collapsed: newCollapsed,
-      form: null, focus: id, panel: id, panelTab: 'family',
-    });
+    const cid = nid();
+    const draft: Person = {
+      id: cid, first: v.first, last: v.last, maiden: v.maiden, gender: v.gender,
+      dob: v.dob, pob: v.pob, dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
+      occupation: v.occupation, residency: v.residency,
+      gotra: v.gotra, shasan: v.shasan,
+      label: v.label || (form.group === 'spouse' ? 'Married in' : kindLabel(form.group, v.gender)),
+      bio: v.bio, archives: [], media: [], sample: false,
+      originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',
+    };
+
+    set({ savingForm: true });
+    try {
+      // Order matters: the person has to exist before a union can reference
+      // them, and the id used from here on must be the one the backend
+      // assigned. Writing unions first with a client-invented id is what made
+      // spouses vanish on reload — the person saved, the marriage did not.
+      const saved = await repo.createPerson(activeTreeId, draft);
+      const id = saved.id;
+
+      // The photo can only be uploaded now: the storage path needs the person
+      // id, which does not exist until the row is created. This is why the
+      // picker on the add form had nowhere to put its result.
+      let photoUrl: string | undefined;
+      if (v.photo.startsWith('data:')) {
+        photoUrl = (await repo.setPhoto(activeTreeId, id, v.photo)) ?? undefined;
+      }
+
+      const np: Person = { ...draft, id, photoUrl };
+      const newPersons = [...persons, np];
+
+      if (form.group === 'root' || !t) {
+        // First person in the archive: nothing to link them to. Creating a
+        // union here would reference an empty id, and getRoot() would then walk
+        // up into a person that does not exist and render an empty canvas.
+        newCollapsed[id] = false;
+      } else if (form.group === 'spouse') {
+        const u = await repo.createUnion(activeTreeId, {
+          id: 'u' + cid, a: t, b: id, date: v.mdate, place: v.mplace, children: [],
+        });
+        newUnions.push(u);
+        newCollapsed[u.id] = false;
+      } else if (form.group === 'child') {
+        let u = newUnions.find(x => x.a === t || x.b === t);
+        if (!u) {
+          u = await repo.createUnion(activeTreeId, {
+            id: 'u' + cid, a: t, b: null, date: '', place: '', children: [],
+          });
+          newUnions.push(u);
+        }
+        u.children.push(id);
+        newCollapsed[u.id] = false;
+        await repo.addChild(u.id, id);
+      } else if (form.group === 'sibling') {
+        let u = newUnions.find(x => x.children.includes(t));
+        if (!u) {
+          // This branch used to push a union locally and never persist it, so
+          // the sibling link disappeared on the next load.
+          u = await repo.createUnion(activeTreeId, {
+            id: 'u' + cid, a: null, b: null, date: '', place: '', children: [t],
+          });
+          newUnions.push(u);
+        }
+        u.children.push(id);
+        newCollapsed[u.id] = false;
+        await repo.addChild(u.id, id);
+      } else {
+        // Parent: fill the empty slot on the anchor's parent union.
+        let u = newUnions.find(x => x.children.includes(t));
+        if (!u) {
+          u = await repo.createUnion(activeTreeId, {
+            id: 'u' + cid, a: id, b: null, date: '', place: '', children: [t],
+          });
+          newUnions.push(u);
+        } else {
+          if (!u.a) u.a = id; else u.b = id;
+          // Filling a slot never wrote anything back before.
+          await repo.updateUnion(u);
+        }
+        newCollapsed[u.id] = false;
+      }
+
+      set(s => ({
+        persons: newPersons, unions: newUnions, collapsed: newCollapsed,
+        // The first person becomes the root; afterwards the root never moves.
+        rootId: s.rootId || id,
+        // Back to the tree, not into the detail panel: adding is always started
+        // from the tree, and entering several people in a row means dismissing
+        // a panel every time. The new card is focused so it's easy to spot.
+        form: null, focus: id, panel: null,
+        savingForm: false,
+      }));
+    } catch (e) {
+      // The form stays open with the values intact so the entry isn't lost.
+      set({
+        notice: e instanceof Error ? e.message : 'Could not save this person.',
+        savingForm: false,
+      });
+    }
   },
 
   // ---------------------------------------------------------------- delete
@@ -627,7 +778,11 @@ export const useTreeStore = create<Store>((set, get) => ({
         b: u.b === id ? null : u.b,
       }))
       .filter(u => u.a || u.b || u.children.length);
-    void repo.deletePerson(id);
+    // Optimistic: the card goes immediately. If the write loses, say so rather
+    // than letting the person quietly reappear on the next reload.
+    void repo.deletePerson(id).catch((e: unknown) => set({
+      notice: e instanceof Error ? e.message : 'Could not delete on the server — reload to see the true state.',
+    }));
     set({
       persons: newPersons, unions: newUnions,
       confirmDeleteId: null, form: null,
@@ -638,11 +793,20 @@ export const useTreeStore = create<Store>((set, get) => ({
   // ---------------------------------------------------------------- photo
 
   setPhoto: (id, dataUrl) => {
+    const { activeTreeId } = get();
+    // Show the local data URL straight away, then swap in the stored path once
+    // the upload lands so a reload resolves it to a fresh signed URL.
     set(s => ({
       persons: s.persons.map(p => p.id === id ? { ...p, photoUrl: dataUrl ?? undefined } : p),
       notice: dataUrl ? 'Profile photo updated' : 'Profile photo removed',
     }));
-    void repo.setPhoto(id, dataUrl);
+    void repo.setPhoto(activeTreeId, id, dataUrl)
+      .then(stored => set(s => ({
+        persons: s.persons.map(p => p.id === id ? { ...p, photoUrl: stored ?? undefined } : p),
+      })))
+      .catch((e: unknown) => set({
+        notice: e instanceof Error ? e.message : 'Could not save the photo.',
+      }));
   },
 
   // ---------------------------------------------------------------- archives
@@ -651,15 +815,16 @@ export const useTreeStore = create<Store>((set, get) => ({
     plusMenu: null, form: null,
     archiveForm: {
       targetId: id, title: '', category: 'Historical Photograph / Portrait',
-      year: '', origin: '', notes: '', file: '',
+      year: '', origin: '', notes: '', file: '', fileData: null,
     },
   }),
   closeArchiveForm: () => set({ archiveForm: null }),
   setArchiveField: (key, val) => set(s => s.archiveForm ? { archiveForm: { ...s.archiveForm, [key]: val } } : {}),
-  saveArchive: () => {
-    const { archiveForm, persons } = get();
-    if (!archiveForm) return;
-    const rec = {
+  saveArchive: async () => {
+    const { archiveForm, activeTreeId, savingArchive } = get();
+    if (!archiveForm || savingArchive) return;
+    const targetId = archiveForm.targetId;
+    const draft: Archive = {
       id: 'a' + nid(),
       title: archiveForm.title || 'Untitled record',
       year: archiveForm.year,
@@ -667,12 +832,43 @@ export const useTreeStore = create<Store>((set, get) => ({
       desc: archiveForm.notes,
       origin: archiveForm.origin,
     };
-    set({
-      persons: persons.map(p => p.id === archiveForm.targetId
-        ? { ...p, archives: [...p.archives, rec] } : p),
-      archiveForm: null, panel: archiveForm.targetId, panelTab: 'archives',
-    });
-    void repo.addArchive(archiveForm.targetId, rec);
+
+    set({ savingArchive: true });
+    try {
+      // Awaited so the record carries the real row id and storage path. The old
+      // fire-and-forget version kept a client id that matched nothing in the DB.
+      const saved = await repo.addArchive(activeTreeId, targetId, draft, archiveForm.fileData);
+      set(s => ({
+        persons: s.persons.map(p => p.id === targetId
+          ? { ...p, archives: [...p.archives, saved] } : p),
+        archiveForm: null, panel: targetId, panelTab: 'archives',
+        savingArchive: false,
+      }));
+    } catch (e) {
+      // Form stays open with the entry intact.
+      set({
+        savingArchive: false,
+        notice: e instanceof Error ? e.message : 'Could not save this record.',
+      });
+    }
+  },
+
+  deleteArchive: async (personId, archiveId) => {
+    const rec = get().persons.find(p => p.id === personId)?.archives.find(a => a.id === archiveId);
+    if (!rec) return;
+    try {
+      // Awaited rather than optimistic: this removes a stored file and cannot
+      // be undone, so the card should not disappear unless it really went.
+      await repo.deleteArchive(rec);
+      set(s => ({
+        persons: s.persons.map(p => p.id === personId
+          ? { ...p, archives: p.archives.filter(a => a.id !== archiveId) }
+          : p),
+        notice: 'Archive record deleted',
+      }));
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not delete that record.' });
+    }
   },
 
   // ---------------------------------------------------------------- viewer
@@ -682,12 +878,84 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   // ---------------------------------------------------------------- invites
 
-  setInviteOpen: v => set({ inviteOpen: v, copied: false }),
-  setInviteRole: r => set({ inviteRole: r, copied: false }),
-  regenerateInvite: () => set({ inviteToken: randomToken(), copied: false }),
+  setInviteOpen: v => {
+    // No token until one is actually minted. The old modal showed a link the
+    // moment it opened, generated client-side and never stored, so every link
+    // it produced was dead on arrival.
+    set({ inviteOpen: v, copied: false, inviteToken: '', inviteError: '' });
+    if (v) void get().loadInvites();
+  },
+  // Changing the role invalidates an already-minted link: that token's role is
+  // fixed in the database and cannot be changed by the query string.
+  setInviteRole: r => set({ inviteRole: r, copied: false, inviteToken: '' }),
   setCopied: v => set({ copied: v }),
+
+  loadInvites: async () => {
+    const { activeTreeId } = get();
+    if (!activeTreeId) return;
+    try {
+      set({ invites: await repo.listInvites(activeTreeId) });
+    } catch {
+      // Informational list only — a failure here shouldn't block minting.
+    }
+  },
+
+  createInviteLink: async () => {
+    const { activeTreeId, inviteRole } = get();
+    set({ creatingInvite: true, inviteError: '' });
+    try {
+      const inv = await repo.createInvite(activeTreeId, inviteRole);
+      set(s => ({ inviteToken: inv.token, invites: [inv, ...s.invites], copied: false }));
+    } catch (e) {
+      set({ inviteError: e instanceof Error ? e.message : 'Could not create an invite link.' });
+    } finally {
+      set({ creatingInvite: false });
+    }
+  },
+
+  revokeInviteToken: async token => {
+    try {
+      await repo.revokeInvite(token);
+      set(s => ({
+        invites: s.invites.map(i =>
+          i.token === token ? { ...i, revokedAt: new Date().toISOString() } : i),
+        inviteToken: s.inviteToken === token ? '' : s.inviteToken,
+      }));
+    } catch (e) {
+      set({ inviteError: e instanceof Error ? e.message : 'Could not revoke that link.' });
+    }
+  },
+
+  /**
+   * Consumes a ?invite= token once the user is signed in. Nothing did this
+   * before, so following an invite link authenticated you and then left you
+   * with no membership.
+   */
+  redeemPendingInvite: async () => {
+    const token = get().pendingInvite;
+    if (!token || !get().session) return;
+    // Strip the token from the address bar either way, so a refresh cannot
+    // replay it and a shared screenshot cannot leak it.
+    const clearUrl = () => window.history.replaceState({}, document.title, window.location.pathname);
+    try {
+      const treeId = await repo.redeemInvite(token);
+      // Re-read the session: the role now comes from the membership just created.
+      const fresh = await repo.getSession();
+      set(s => ({ session: fresh ?? s.session, pendingInvite: null }));
+      clearUrl();
+      await get().loadActiveTree(treeId);
+    } catch (e) {
+      set({
+        pendingInvite: null,
+        notice: e instanceof Error ? e.message : 'That invite link could not be used.',
+      });
+      clearUrl();
+    }
+  },
+
   inviteUrl: () => {
     const { inviteToken, inviteRole } = get();
+    if (!inviteToken) return '';
     const base = window.location.href.split('?')[0].split('#')[0];
     return `${base}?invite=${inviteToken}&role=${inviteRole}`;
   },
@@ -695,21 +963,61 @@ export const useTreeStore = create<Store>((set, get) => ({
   // ---------------------------------------------------------------- trees
 
   setNewTreeOpen: v => set({ newTreeOpen: v }),
-  createTree: (name, notes) => {
-    const id = nid();
-    set(s => ({
-      trees: [...s.trees, { id, name, originNotes: notes }],
-      activeTreeId: id,
-      persons: [], unions: [], collapsed: {},
-      focus: null, panel: null, branch: null,
-      treeMenu: false, newTreeOpen: false,
-    }));
-    void repo.createTree(name, notes);
+  createTree: async (name, place, country) => {
+    try {
+      // The id comes back from the backend rather than nid(): a client-invented
+      // id would never match the row, and every later write would miss.
+      const id = await repo.createTree(name, place, country);
+      set(s => ({
+        trees: [...s.trees, { id, name, originPlace: place, originCountry: country }],
+        // Park the outgoing tree, same as switchTree, or it is lost on switch back.
+        treeCache: {
+          ...s.treeCache,
+          [s.activeTreeId]: {
+            persons: s.persons, unions: s.unions, rootId: s.rootId, collapsed: s.collapsed,
+          },
+        },
+        activeTreeId: id,
+        // rootId was left pointing at the previous tree's root.
+        persons: [], unions: [], collapsed: {}, rootId: '',
+        focus: null, panel: null, branch: null,
+        treeMenu: false, newTreeOpen: false,
+      }));
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not create the family tree.' });
+    }
   },
-  switchTree: id => set(s =>
-    id === s.activeTreeId
-      ? { treeMenu: false }
-      : { activeTreeId: id, treeMenu: false, focus: null, panel: null, branch: null }),
+  switchTree: async id => {
+    if (id === get().activeTreeId) {
+      set({ treeMenu: false });
+      return;
+    }
+
+    // Park the outgoing tree before switching. Without this the canvas kept
+    // rendering the previous family's people under the new tree's name, while
+    // every write went to the new tree_id.
+    set(s => ({
+      treeCache: {
+        ...s.treeCache,
+        [s.activeTreeId]: {
+          persons: s.persons, unions: s.unions, rootId: s.rootId, collapsed: s.collapsed,
+        },
+      },
+      activeTreeId: id, treeMenu: false, focus: null, panel: null, branch: null,
+    }));
+
+    // Against Supabase, re-read rather than trust the cache: another member may
+    // have changed the tree since it was last open.
+    if (repo.kind === 'supabase') {
+      await get().loadActiveTree(id);
+      return;
+    }
+
+    const cached = get().treeCache[id];
+    set(cached
+      ? { persons: cached.persons, unions: cached.unions, rootId: cached.rootId, collapsed: cached.collapsed }
+      : { persons: [], unions: [], rootId: '', collapsed: {} });
+  },
 
   setHeaderQ: q => set({ headerQ: q }),
   setDirSort: k => set(s => s.dirSort === k ? { dirSortAsc: !s.dirSortAsc } : { dirSort: k, dirSortAsc: true }),

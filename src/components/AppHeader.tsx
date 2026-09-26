@@ -20,7 +20,7 @@ export function AppHeader() {
     headerQ, treeMenu, dataMenu, exportMenu, userMenu, searchOpen,
     persons, unions,
     setView, setInviteOpen, setDataMenu, setTreeMenu, setExportMenu, setUserMenu, setSearchOpen,
-    setHeaderQ, openPanel, switchTree, setNewTreeOpen, closeAllMenus,
+    setHeaderQ, openPanel, switchTree, setNewTreeOpen, closeHeaderMenus,
     toggleDemoRole, signOut, openAddDialog, setNotice,
   } = store;
 
@@ -51,11 +51,11 @@ export function AppHeader() {
   const headerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (headerRef.current && !headerRef.current.contains(e.target as Node)) closeAllMenus();
+      if (headerRef.current && !headerRef.current.contains(e.target as Node)) closeHeaderMenus();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [closeAllMenus]);
+  }, [closeHeaderMenus]);
 
   const handleExcel = async () => {
     setExportMenu(false);
@@ -162,7 +162,7 @@ export function AppHeader() {
             onClick={() => setTreeMenu(!treeMenu)}
             style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: '2px 0 0', cursor: 'pointer', color: '#78716C', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit' }}
           >
-            Genealogy &amp; Roots Archive
+            {[activeTree?.originPlace, activeTree?.originCountry].filter(Boolean).join(', ') || 'Genealogy & Roots Archive'}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 9l6 6 6-6" /></svg>
           </button>
         </div>
@@ -275,7 +275,7 @@ export function AppHeader() {
           {exportMenu && (
             <div style={{ position: 'absolute', top: 46, right: 0, width: 236, background: '#fff', border: '1px solid #E7E2DC', borderRadius: 14, boxShadow: '0 18px 44px rgba(28,25,23,.14)', padding: 7, zIndex: 60 }}>
               {[
-                { badge: 'PDF', bg: '#FEE2E2', fg: '#B91C1C', title: 'Export as PDF', sub: 'Printable member directory', onClick: handlePdf },
+                { badge: 'PDF', bg: '#FEE2E2', fg: '#B91C1C', title: 'Export as PDF', sub: 'The tree as a printable chart', onClick: handlePdf },
                 { badge: 'XLS', bg: '#DCFCE7', fg: '#15803D', title: 'Export as Excel', sub: 'All members as a spreadsheet', onClick: () => void handleExcel() },
               ].map(row => (
                 <button

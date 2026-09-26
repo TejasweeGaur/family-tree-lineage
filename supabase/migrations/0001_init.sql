@@ -185,8 +185,10 @@ create policy trees_write  on trees for update using (is_admin (id)) with check 
 create policy trees_delete on trees for delete using (is_admin (id));
 
 create policy memberships_read on memberships for select using (is_member (tree_id));
--- A user may create their own membership (join via invite); admins manage others.
-create policy memberships_join  on memberships for insert with check (user_id = auth.uid () or is_admin (tree_id));
+-- Only admins add members directly. A user CANNOT insert their own row: that
+-- would let anyone self-grant `admin` on any tree_id they can guess. Joining is
+-- possible only through redeem_invite(), which derives the role from the invite.
+create policy memberships_admin_add on memberships for insert with check (is_admin (tree_id));
 create policy memberships_admin on memberships for update using (is_admin (tree_id)) with check (is_admin (tree_id));
 create policy memberships_leave on memberships for delete using (user_id = auth.uid () or is_admin (tree_id));
 
@@ -214,7 +216,10 @@ create policy media_write on media_items for all
   using (is_admin (tree_of_person (person_id)))
   with check (is_admin (tree_of_person (person_id)));
 
-create policy invites_read  on invites for select using (is_member (tree_id));
+-- Admins only, deliberately. A viewer who could list invite rows would see any
+-- outstanding `admin` token and could redeem it to promote themselves.
+-- Invitees never select from this table; redeem_invite() reads it for them.
+create policy invites_read  on invites for select using (is_admin (tree_id));
 create policy invites_write on invites for all    using (is_admin (tree_id)) with check (is_admin (tree_id));
 
 -- ---------------------------------------------------------------- integrity
@@ -238,16 +243,129 @@ $$;
 create trigger persons_block_delete before delete on persons
   for each row execute function block_delete_with_children ();
 
--- Drop unions once both partners are gone.
+-- Drop unions once both partners are gone. The `when` clause keeps this off the
+-- hot path for ordinary edits; the delete fires no update trigger, so the
+-- self-referencing delete cannot recurse.
 create or replace function prune_empty_unions ()
 returns trigger language plpgsql as $$
 begin
-  delete from unions
-  where id = coalesce(new.id, old.id)
-    and partner_a is null and partner_b is null;
+  delete from unions where id = old.id;
   return null;
 end;
 $$;
 
 create trigger unions_prune after update on unions
-  for each row execute function prune_empty_unions ();
+  for each row when (new.partner_a is null and new.partner_b is null)
+  execute function prune_empty_unions ();
+
+-- ---------------------------------------------------------------- rpc
+
+-- Bootstrapping a tree needs both the row and the creator's admin membership,
+-- and neither insert can satisfy the other's RLS on its own: trees_read wants a
+-- membership that does not exist yet, and memberships_admin_add wants an admin
+-- that does not exist yet. Doing both here, security definer, breaks the cycle.
+create or replace function create_tree (tree_name text, notes text default '')
+returns uuid language plpgsql security definer set search_path = public as $$
+declare t_id uuid;
+begin
+  if auth.uid () is null then
+    raise exception 'Not authenticated';
+  end if;
+  if coalesce(trim(tree_name), '') = '' then
+    raise exception 'Tree name is required';
+  end if;
+
+  insert into trees (name, origin_notes, created_by)
+  values (trim(tree_name), coalesce(notes, ''), auth.uid ())
+  returning id into t_id;
+
+  insert into memberships (tree_id, user_id, role)
+  values (t_id, auth.uid (), 'admin');
+
+  return t_id;
+end;
+$$;
+
+-- The ONLY path by which a user joins a tree they do not already belong to.
+-- The role comes from the stored invite row, never from the caller, so the
+-- ?role= parameter on an invite link is cosmetic and cannot be tampered with.
+create or replace function redeem_invite (invite_token text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare inv invites%rowtype;
+begin
+  if auth.uid () is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  select * into inv from invites where token = invite_token;
+
+  if not found then
+    raise exception 'This invite link is not valid';
+  end if;
+  if inv.revoked_at is not null then
+    raise exception 'This invite link has been revoked';
+  end if;
+  if inv.expires_at is not null and inv.expires_at < now () then
+    raise exception 'This invite link has expired';
+  end if;
+
+  -- Redeeming may promote a viewer to admin, but never demotes an existing
+  -- admin who happens to open a viewer link.
+  insert into memberships (tree_id, user_id, role)
+  values (inv.tree_id, auth.uid (), inv.role)
+  on conflict (tree_id, user_id) do update
+    set role = case when excluded.role = 'admin' then 'admin' else memberships.role end;
+
+  return inv.tree_id;
+end;
+$$;
+
+revoke all on function create_tree (text, text) from public;
+revoke all on function redeem_invite (text) from public;
+grant execute on function create_tree (text, text) to authenticated;
+grant execute on function redeem_invite (text) to authenticated;
+
+-- ---------------------------------------------------------------- storage
+
+-- Both buckets are private: this archive holds photographs and documents of
+-- living people. Reads go through short-lived signed URLs, not public links.
+-- Object paths are `<tree_id>/<rest...>`, which is what the policies key on.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('photos',   'photos',   false, 5242880,  array['image/jpeg','image/png','image/webp']),
+  ('archives', 'archives', false, 15728640, array['image/jpeg','image/png','image/webp','application/pdf'])
+on conflict (id) do nothing;
+
+-- Compared as text so a non-uuid first path segment fails the check instead of
+-- raising a cast error.
+create or replace function storage_tree_member (object_name text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from memberships m
+    where m.user_id = auth.uid ()
+      and m.tree_id::text = (storage.foldername (object_name))[1]
+  );
+$$;
+
+create or replace function storage_tree_admin (object_name text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from memberships m
+    where m.user_id = auth.uid ()
+      and m.role = 'admin'
+      and m.tree_id::text = (storage.foldername (object_name))[1]
+  );
+$$;
+
+create policy storage_read on storage.objects for select
+  using (bucket_id in ('photos', 'archives') and storage_tree_member (name));
+
+create policy storage_insert on storage.objects for insert
+  with check (bucket_id in ('photos', 'archives') and storage_tree_admin (name));
+
+create policy storage_update on storage.objects for update
+  using (bucket_id in ('photos', 'archives') and storage_tree_admin (name))
+  with check (bucket_id in ('photos', 'archives') and storage_tree_admin (name));
+
+create policy storage_delete on storage.objects for delete
+  using (bucket_id in ('photos', 'archives') and storage_tree_admin (name));

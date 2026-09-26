@@ -3,6 +3,7 @@ import { palette } from '../utils/palette';
 import { lifeDates } from '../utils/dates';
 import { initials, fullName } from '../utils/kinship';
 import { useTreeStore } from '../store/useTreeStore';
+import { useSignedUrl } from '../hooks/useSignedUrl';
 import type { Person } from '../types';
 
 interface Props {
@@ -27,6 +28,7 @@ export function PersonCard({
   const askDelete = useTreeStore(s => s.askDelete);
 
   const plusBtnRef = useRef<HTMLButtonElement>(null);
+  const photoSrc = useSignedUrl(person.photoUrl);
   const c = palette(person.gender);
   const border = isFocus ? c.accent : c.border;
   const shadow = isFocus
@@ -128,11 +130,11 @@ export function PersonCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
         <div style={{
           width: 58, height: 58, borderRadius: '50%', flexShrink: 0,
-          background: person.photoUrl ? `#fff url(${person.photoUrl}) center/cover` : c.avFill,
+          background: photoSrc ? `#fff url(${photoSrc}) center/cover` : c.avFill,
           boxShadow: '0 0 0 3px #fff, 0 1px 4px rgba(28,25,23,.12)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
         }}>
-          {!person.photoUrl && (
+          {!photoSrc && (
             <span style={{ fontSize: 17, fontWeight: 800, color: c.avText, letterSpacing: '.02em' }}>
               {initials(person)}
             </span>

@@ -7,6 +7,13 @@ export interface Archive {
   category: string;
   desc: string;
   origin: string;
+  /**
+   * Storage path, bucket-prefixed: "archives/<treeId>/<personId>/<file>".
+   * A path and not a URL — both buckets are private, so URLs are signed at
+   * render time and expire. Persisting a signed URL would rot silently.
+   */
+  filePath?: string;
+  fileName?: string;
 }
 
 export interface MediaItem {
@@ -58,7 +65,9 @@ export interface Union {
 export interface Tree {
   id: string;
   name: string;
-  originNotes: string;
+  /** Ancestral town or village. Free text — historic names rarely match modern ones. */
+  originPlace: string;
+  originCountry: string;
 }
 
 /** Membership role. Authoritative value comes from the server; never from a query param. */
@@ -74,6 +83,13 @@ export interface User {
 export interface Session {
   user: User;
   role: Role;
+  /**
+   * The tree this user belongs to, or null when they are authenticated but hold
+   * no membership yet. Null is a first-run state, not a rejection: the app
+   * offers to create an archive. Distinguishing it from a null Session (not
+   * signed in at all) is what keeps those two screens apart.
+   */
+  treeId: string | null;
 }
 
 export interface Invite {
@@ -172,6 +188,12 @@ export interface FormValues {
   bio: string;
   mdate: string;
   mplace: string;
+  /**
+   * Either an existing stored path (unchanged) or a new `data:` URL just
+   * picked. Only `data:` values are uploaded on save, so re-saving a profile
+   * without touching the picture doesn't re-upload it.
+   */
+  photo: string;
 }
 
 export interface FormState {
@@ -189,7 +211,10 @@ export interface ArchiveFormState {
   year: string;
   origin: string;
   notes: string;
+  /** Display name of the chosen file. */
   file: string;
+  /** The actual file to upload; null until one is picked. */
+  fileData: File | null;
 }
 
 export type DirSortKey = 'name' | 'dob' | 'label';
@@ -217,5 +242,7 @@ export interface ViewerRecord {
   title: string;
   sub: string;
   kind: string;
+  /** Stored object path; resolved to a signed URL when the viewer opens. */
   url?: string;
+  fileName?: string;
 }

@@ -1,5 +1,8 @@
+import { useRef } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { renderMarkdown } from '../utils/markdown';
+import { readSquarePhoto } from '../utils/image';
+import { useSignedUrl } from '../hooks/useSignedUrl';
 
 const LABEL_CHIPS = [
   'Ancestral Patriarch', 'Ancestral Matriarch', 'Patriarch', 'Matriarch',
@@ -9,8 +12,22 @@ const LABEL_CHIPS = [
 
 export function PersonForm() {
   const store = useTreeStore();
-  const { form, persons } = store;
+  const { form, persons, savingForm } = store;
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Hooks must run unconditionally, so this sits above the early return.
+  const photoSrc = useSignedUrl(form?.values.photo || undefined);
   if (!form) return null;
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      // Centre-cropped and downscaled to a 320px JPEG before it ever leaves the
+      // browser — a 4MB phone photo becomes ~150KB of storage quota.
+      store.setFormValue('photo', await readSquarePhoto(file));
+    } catch (err) {
+      store.setNotice(err instanceof Error ? err.message : 'Could not read that image.');
+    }
+  };
 
   const v = form.values;
   const isEdit = form.mode === 'edit';
@@ -81,14 +98,38 @@ export function PersonForm() {
 
           {/* Avatar + gender */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: 16, border: '1px solid #EFE9E2', borderRadius: 16, background: '#FAF8F5' }}>
-            <button type="button" style={{
-              width: 78, height: 78, borderRadius: '50%', flexShrink: 0,
-              border: '2px dashed rgba(28,25,23,.18)', background: pal.avFill,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-            }}>
-              <span style={{ fontSize: 24, fontWeight: 800, color: pal.avText }}>{avInitials}</span>
-              <span style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', padding: '2px 8px', borderRadius: 99, background: '#1C1917', color: '#fff', fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap' }}>Upload</span>
-            </button>
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={e => { void pickPhoto(e.target.files?.[0]); e.target.value = ''; }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label={photoSrc ? 'Change photo' : 'Upload photo'}
+                style={{
+                  width: 78, height: 78, borderRadius: '50%',
+                  border: '2px dashed rgba(28,25,23,.18)',
+                  background: photoSrc ? `#fff url(${photoSrc}) center/cover` : pal.avFill,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                }}
+              >
+                {!photoSrc && <span style={{ fontSize: 24, fontWeight: 800, color: pal.avText }}>{avInitials}</span>}
+                <span style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', padding: '2px 8px', borderRadius: 99, background: '#1C1917', color: '#fff', fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {photoSrc ? 'Change' : 'Upload'}
+                </span>
+              </button>
+              {photoSrc && (
+                <button
+                  type="button"
+                  onClick={() => store.setFormValue('photo', '')}
+                  style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#B91C1C', fontFamily: 'inherit' }}
+                >Remove</button>
+              )}
+            </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.12em', color: '#A8A29E', marginBottom: 9 }}>GENDER (COLOR IDENTIFICATION) *</div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -235,13 +276,13 @@ export function PersonForm() {
         {/* Footer */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 22px', borderTop: '1px solid #EFE9E2', background: '#FFFDFB' }}>
           <button type="button" onClick={store.closeForm} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#78716C' }}>Cancel</button>
-          <button type="button" onClick={store.saveForm} disabled={!v.first || !v.last} style={{
+          <button type="button" onClick={() => void store.saveForm()} disabled={!v.first || !v.last || savingForm} style={{
             padding: '10px 20px', borderRadius: 10, border: 'none',
-            background: v.first && v.last ? '#1C1917' : '#A8A29E',
-            color: '#fff', cursor: v.first && v.last ? 'pointer' : 'not-allowed',
+            background: v.first && v.last && !savingForm ? '#1C1917' : '#A8A29E',
+            color: '#fff', cursor: v.first && v.last && !savingForm ? 'pointer' : 'not-allowed',
             fontSize: 12.5, fontWeight: 700,
           }}>
-            {isEdit ? 'Save Changes' : 'Add to Tree'}
+            {savingForm ? 'Saving…' : isEdit ? 'Save Changes' : 'Add to Tree'}
           </button>
         </div>
       </div>

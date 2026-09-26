@@ -5,6 +5,7 @@ import { lifeDates, lifeSpanLong, ageLabel, fmtDate, shortDate } from '../utils/
 import { initials, fullName, parentsOf, siblingsOf, unionsOf, kinSentence, kinPath } from '../utils/kinship';
 import { renderMarkdown } from '../utils/markdown';
 import { readSquarePhoto } from '../utils/image';
+import { useSignedUrl } from '../hooks/useSignedUrl';
 import type { Person, Union } from '../types';
 
 type Data = { persons: Person[]; unions: Union[] };
@@ -128,6 +129,7 @@ function HeroSection({ person }: { person: Person; data: Data }) {
   const setPhoto = useTreeStore(s => s.setPhoto);
   const setNotice = useTreeStore(s => s.setNotice);
   const fileRef = useRef<HTMLInputElement>(null);
+  const photoSrc = useSignedUrl(person.photoUrl);
   const c = palette(person.gender);
 
   const pickPhoto = async (file?: File) => {
@@ -149,14 +151,14 @@ function HeroSection({ person }: { person: Person; data: Data }) {
           onClick={isAdmin ? () => fileRef.current?.click() : undefined}
           style={{
             width: 82, height: 82, borderRadius: '50%', flexShrink: 0,
-            background: person.photoUrl ? 'transparent' : c.avFill,
+            background: photoSrc ? 'transparent' : c.avFill,
             boxShadow: '0 0 0 4px #fff, 0 3px 10px rgba(28,25,23,.12)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
             overflow: 'hidden', cursor: isAdmin ? 'pointer' : 'default',
           }}
         >
-          {person.photoUrl
-            ? <img src={person.photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
+          {photoSrc
+            ? <img src={photoSrc} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
             : <span style={{ fontSize: 26, fontWeight: 800, color: c.avText }}>{initials(person)}</span>
           }
           {isAdmin && (
@@ -295,43 +297,7 @@ function ArchivesTab({ person }: { person: Person }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', gap: 14 }}>
         {person.archives.map(a => (
-          <div key={a.id} style={{ border: '1px solid #E7E2DC', borderRadius: 14, overflow: 'hidden', background: '#fff' }}>
-            <div style={{
-              height: 118, position: 'relative',
-              backgroundColor: '#F7F3ED',
-              backgroundImage: 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10, color: '#A8A29E', letterSpacing: '.04em' }}>
-                document scan
-              </span>
-              <span style={{
-                position: 'absolute', top: 9, left: 9,
-                padding: '3px 8px', borderRadius: 6,
-                background: '#1C1917', color: '#fff', fontSize: 10.5, fontWeight: 800,
-              }}>
-                {a.year}
-              </span>
-            </div>
-            <div style={{ padding: '12px 13px' }}>
-              <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.3 }}>{a.title}</div>
-              <div style={{
-                fontSize: 11.5, color: '#78716C', lineHeight: 1.45, marginTop: 5,
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-              }}>
-                {a.desc}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 11, paddingTop: 10, borderTop: '1px solid #F3EFEA' }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: '#A8A29E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.category}
-                </span>
-                <button type="button" onClick={() => openViewer({ title: a.title, sub: `${a.category} · ${a.origin}`, kind: 'document scan' })}
-                  style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C', whiteSpace: 'nowrap' }}>
-                  View &gt;
-                </button>
-              </div>
-            </div>
-          </div>
+          <ArchiveCard key={a.id} a={a} personId={person.id} admin={admin} onView={openViewer} />
         ))}
       </div>
     </div>

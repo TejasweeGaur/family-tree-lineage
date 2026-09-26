@@ -16,9 +16,13 @@ export function InviteModal() {
   const activeTreeId = useTreeStore(s => s.activeTreeId);
   const setInviteOpen = useTreeStore(s => s.setInviteOpen);
   const setInviteRole = useTreeStore(s => s.setInviteRole);
-  const regenerateInvite = useTreeStore(s => s.regenerateInvite);
   const setCopied = useTreeStore(s => s.setCopied);
   const inviteUrl = useTreeStore(s => s.inviteUrl);
+  const invites = useTreeStore(s => s.invites);
+  const creatingInvite = useTreeStore(s => s.creatingInvite);
+  const inviteError = useTreeStore(s => s.inviteError);
+  const createInviteLink = useTreeStore(s => s.createInviteLink);
+  const revokeInviteToken = useTreeStore(s => s.revokeInviteToken);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -123,44 +127,118 @@ export function InviteModal() {
           <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#78716C', margin: '18px 0 9px' }}>
             INVITE LINK
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              ref={inputRef}
-              readOnly
-              value={url}
-              onFocus={e => e.currentTarget.select()}
-              style={{
-                flex: 1, minWidth: 0, boxSizing: 'border-box', padding: '10px 12px',
-                borderRadius: 10, border: '1px solid #E7E2DC', background: '#F5F1EC',
-                fontSize: 12, color: '#44403C', outline: 'none',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              }}
-            />
-            <button
-              type="button"
-              onClick={copy}
-              style={{
-                flexShrink: 0, padding: '10px 16px', borderRadius: 10, border: 'none',
-                background: copied ? '#15803D' : '#1C1917', color: '#fff',
-                fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              {copied ? 'Copied' : 'Copy link'}
-            </button>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11.5, color: '#A8A29E', flex: '1 1 220px', lineHeight: 1.45 }}>
-              No email is sent. Anyone with this link can join as {inviteRole === 'admin' ? 'an admin' : 'a viewer'}.
-            </span>
-            <button
-              type="button"
-              onClick={regenerateInvite}
-              style={{ padding: '6px 12px', borderRadius: 9, border: '1px solid #E7E2DC', background: '#fff', fontSize: 11.5, fontWeight: 700, color: '#44403C', cursor: 'pointer', fontFamily: 'inherit' }}
-            >
-              New link
-            </button>
-          </div>
+          {url ? (
+            <>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  ref={inputRef}
+                  readOnly
+                  value={url}
+                  onFocus={e => e.currentTarget.select()}
+                  style={{
+                    flex: 1, minWidth: 0, boxSizing: 'border-box', padding: '10px 12px',
+                    borderRadius: 10, border: '1px solid #E7E2DC', background: '#F5F1EC',
+                    fontSize: 12, color: '#44403C', outline: 'none',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={copy}
+                  style={{
+                    flexShrink: 0, padding: '10px 16px', borderRadius: 10, border: 'none',
+                    background: copied ? '#15803D' : '#1C1917', color: '#fff',
+                    fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy link'}
+                </button>
+              </div>
+              <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 9, lineHeight: 1.45 }}>
+                No email is sent. Anyone with this link can join as{' '}
+                {inviteRole === 'admin' ? 'an admin' : 'a viewer'} until you revoke it.
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={creatingInvite}
+                onClick={() => void createInviteLink()}
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '11px 16px',
+                  borderRadius: 10, border: 'none',
+                  background: creatingInvite ? '#A8A29E' : '#1C1917', color: '#fff',
+                  fontSize: 12.5, fontWeight: 700,
+                  cursor: creatingInvite ? 'default' : 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                {creatingInvite ? 'Creating…' : `Create ${inviteRole} invite link`}
+              </button>
+              <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 9, lineHeight: 1.45 }}>
+                The link is recorded so it can be revoked later. Changing the role above
+                needs a new link — the role is fixed when the link is created.
+              </div>
+            </>
+          )}
+
+          {inviteError && (
+            <div style={{ marginTop: 9, fontSize: 12, fontWeight: 600, color: '#B91C1C' }}>
+              {inviteError}
+            </div>
+          )}
+
+          {invites.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#78716C', margin: '20px 0 8px' }}>
+                EXISTING LINKS
+              </div>
+              <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {invites.map(i => {
+                  const revoked = !!i.revokedAt;
+                  return (
+                    <div
+                      key={i.token}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 10px', borderRadius: 10,
+                        border: '1px solid #EFE9E2', background: revoked ? '#FAF8F5' : '#fff',
+                        opacity: revoked ? 0.6 : 1,
+                      }}
+                    >
+                      <span style={{
+                        flexShrink: 0, padding: '2px 7px', borderRadius: 99,
+                        background: i.role === 'admin' ? '#FEF6F1' : '#F0EDE9',
+                        color: i.role === 'admin' ? '#9A3412' : '#57534E',
+                        fontSize: 10, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase',
+                      }}>{i.role}</span>
+                      <span style={{
+                        flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        fontSize: 11.5, color: '#78716C',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        textDecoration: revoked ? 'line-through' : 'none',
+                      }}>{i.token}</span>
+                      {revoked ? (
+                        <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: '#A8A29E' }}>Revoked</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void revokeInviteToken(i.token)}
+                          style={{
+                            flexShrink: 0, padding: '5px 10px', borderRadius: 8,
+                            border: '1px solid #E7E2DC', background: '#fff',
+                            fontSize: 11, fontWeight: 700, color: '#B91C1C',
+                            cursor: 'pointer', fontFamily: 'inherit',
+                          }}
+                        >Revoke</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

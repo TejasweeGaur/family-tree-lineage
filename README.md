@@ -21,7 +21,7 @@ roster in `src/data/seed.ts` and the placeholder sign-in identity — is **ficti
 
 ```bash
 npm install
-npm run dev        # http://localhost:5174
+npm run dev        # http://localhost:5173
 ```
 
 With no Supabase credentials present the app runs in **demo mode**: seed data from

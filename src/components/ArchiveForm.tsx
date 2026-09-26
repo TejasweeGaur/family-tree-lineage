@@ -1,13 +1,36 @@
+import { useRef } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { ARCHIVE_CATEGORIES } from '../data/seed';
 
+const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
+const MAX_BYTES = 15 * 1024 * 1024;
+
 export function ArchiveForm() {
   const store = useTreeStore();
-  const { archiveForm } = store;
+  const { archiveForm, savingArchive } = store;
+  const fileRef = useRef<HTMLInputElement>(null);
   if (!archiveForm) return null;
 
   const person = store.persons.find(p => p.id === archiveForm.targetId);
-  const canSave = !!archiveForm.title;
+  const canSave = !!archiveForm.title && !savingArchive;
+
+  const pick = (f: File | null) => {
+    if (!f) return;
+    // The bucket also caps this at 15 MB, but failing here gives a real message
+    // instead of an opaque storage error after the upload has already started.
+    if (f.size > MAX_BYTES) {
+      store.setNotice('That file is larger than 15MB.');
+      return;
+    }
+    store.setArchiveField('fileData', f);
+    store.setArchiveField('file', f.name);
+  };
+
+  const clearFile = () => {
+    store.setArchiveField('fileData', null);
+    store.setArchiveField('file', '');
+    if (fileRef.current) fileRef.current.value = '';
+  };
 
   return (
     <div style={{
@@ -48,18 +71,57 @@ export function ArchiveForm() {
         {/* Body */}
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 22px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Drop zone */}
-          <div style={{ border: '2px dashed #E2DBD2', borderRadius: 16, padding: 24, textAlign: 'center', background: '#FAF8F5' }}>
-            {archiveForm.file ? (
-              <div style={{ height: 140, borderRadius: 12, marginBottom: 12, backgroundColor: '#F7F3ED', backgroundImage: 'repeating-linear-gradient(135deg,#EFE9E2 0 8px,#F8F5F0 8px 16px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11, color: '#A8A29E' }}>{archiveForm.file}</span>
+          <div
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); pick(e.dataTransfer.files?.[0] ?? null); }}
+            style={{ border: '2px dashed #E2DBD2', borderRadius: 16, padding: 24, textAlign: 'center', background: '#FAF8F5' }}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept={ACCEPT}
+              onChange={e => pick(e.target.files?.[0] ?? null)}
+              style={{ display: 'none' }}
+            />
+
+            {archiveForm.fileData ? (
+              <div style={{ marginBottom: 12 }}>
+                {archiveForm.fileData.type.startsWith('image/') ? (
+                  <img
+                    src={URL.createObjectURL(archiveForm.fileData)}
+                    alt=""
+                    style={{ maxHeight: 150, maxWidth: '100%', borderRadius: 12, display: 'block', margin: '0 auto' }}
+                  />
+                ) : (
+                  <div style={{ height: 90, borderRadius: 12, background: '#F7F3ED', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#78716C' }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" />
+                    </svg>
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>PDF</span>
+                  </div>
+                )}
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#44403C', marginTop: 8, wordBreak: 'break-all' }}>
+                  {archiveForm.file}
+                </div>
+                <div style={{ fontSize: 11, color: '#A8A29E', marginTop: 2 }}>
+                  {(archiveForm.fileData.size / 1048576).toFixed(2)} MB
+                </div>
+                <button type="button" onClick={clearFile} style={{
+                  marginTop: 8, padding: '5px 11px', borderRadius: 8,
+                  border: '1px solid #E7E2DC', background: '#fff',
+                  fontSize: 11.5, fontWeight: 700, color: '#B91C1C', cursor: 'pointer', fontFamily: 'inherit',
+                }}>Remove</button>
               </div>
-            ) : null}
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>Drag and drop a scan or photo here</div>
-            <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3 }}>Supports JPG, PNG, WEBP, PDF up to 15MB</div>
-            <button type="button" onClick={() => store.setArchiveField('file', 'sample_document.pdf')} style={{
-              marginTop: 13, padding: '9px 16px', borderRadius: 10, border: 'none',
-              background: '#1C1917', color: '#fff', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-            }}>Browse File</button>
+            ) : (
+              <>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>Drag and drop a scan or photo here</div>
+                <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3 }}>Supports JPG, PNG, WEBP, PDF up to 15MB</div>
+                <button type="button" onClick={() => fileRef.current?.click()} style={{
+                  marginTop: 13, padding: '9px 16px', borderRadius: 10, border: 'none',
+                  background: '#1C1917', color: '#fff', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                }}>Browse File</button>
+              </>
+            )}
           </div>
 
           {/* Title */}
@@ -95,11 +157,11 @@ export function ArchiveForm() {
         {/* Footer */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 22px', borderTop: '1px solid #EFE9E2' }}>
           <button type="button" onClick={store.closeArchiveForm} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#78716C' }}>Cancel</button>
-          <button type="button" onClick={store.saveArchive} disabled={!canSave} style={{
+          <button type="button" onClick={() => void store.saveArchive()} disabled={!canSave} style={{
             padding: '10px 20px', borderRadius: 10, border: 'none',
             background: canSave ? '#C2410C' : '#A8A29E', color: '#fff',
             cursor: canSave ? 'pointer' : 'not-allowed', fontSize: 12.5, fontWeight: 700,
-          }}>Save to Archives</button>
+          }}>{savingArchive ? 'Saving…' : 'Save to Archives'}</button>
         </div>
       </div>
     </div>

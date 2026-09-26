@@ -5,7 +5,8 @@ import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from './seed'
 export interface TreeSnapshot {
   treeId: string;
   treeName: string;
-  originNotes: string;
+  originPlace: string;
+  originCountry: string;
   rootId: string;
   persons: Person[];
   unions: Union[];
@@ -29,7 +30,7 @@ export interface Repository {
   // tree
   loadTree(treeId?: string): Promise<TreeSnapshot>;
   listTrees(): Promise<Array<{ id: string; name: string }>>;
-  createTree(name: string, originNotes: string): Promise<string>;
+  createTree(name: string, place: string, country: string): Promise<string>;
 
   // people & relationships
   createPerson(treeId: string, p: Person): Promise<Person>;
@@ -41,14 +42,22 @@ export interface Repository {
   removeUnionPartner(unionId: string, personId: string): Promise<void>;
 
   // attachments
-  addArchive(personId: string, a: Archive): Promise<void>;
+  addArchive(treeId: string, personId: string, a: Archive, file: File | null): Promise<Archive>;
+  deleteArchive(a: Archive): Promise<void>;
   addMedia(personId: string, m: MediaItem): Promise<void>;
-  setPhoto(personId: string, dataUrl: string | null): Promise<string | null>;
+  setPhoto(treeId: string, personId: string, dataUrl: string | null): Promise<string | null>;
+  /**
+   * Turns a stored object path into something an <img> or <a> can use.
+   * Passes through values that are already URLs (demo mode uses data: URLs).
+   */
+  signedUrl(stored: string): Promise<string | null>;
 
   // invites
   listInvites(treeId: string): Promise<Invite[]>;
   createInvite(treeId: string, role: Role): Promise<Invite>;
   revokeInvite(token: string): Promise<void>;
+  /** Joins the caller to the invite's tree. Resolves to the tree id. */
+  redeemInvite(token: string): Promise<string>;
 }
 
 // ---------------------------------------------------------------- local
@@ -62,6 +71,22 @@ const DEMO_USER: User = {
 
 const SESSION_KEY = 'ft.session';
 const LOCAL_TREE_ID = 'local-tree';
+
+/**
+ * Unique object name that still carries the original filename, so the display
+ * name can be recovered from the path. Avoids needing a extra DB column for it.
+ */
+function objectName(original: string): string {
+  const safe = original.replace(/[^\w.-]+/g, '_').slice(-60);
+  return `${crypto.randomUUID()}__${safe}`;
+}
+
+/** Inverse of objectName(): the original filename, for display and download. */
+function displayName(stored: string): string {
+  const last = stored.split('/').pop() ?? '';
+  const sep = last.indexOf('__');
+  return sep >= 0 ? last.slice(sep + 2) : last;
+}
 
 function randomToken(): string {
   const a = new Uint8Array(9);
@@ -83,7 +108,10 @@ class LocalRepository implements Repository {
   async getSession(): Promise<Session | null> {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? (JSON.parse(raw) as Session) : null;
+      if (!raw) return null;
+      const s = JSON.parse(raw) as Session;
+      // Backfill treeId so a session stored before the field existed still resolves.
+      return { ...s, treeId: s.treeId ?? LOCAL_TREE_ID };
     } catch {
       return null;
     }
@@ -93,7 +121,7 @@ class LocalRepository implements Repository {
     // Without a real identity provider the role comes from the invite that
     // brought you here, defaulting to admin so the demo is explorable.
     const invite = inviteToken ? this.invites.find(i => i.token === inviteToken && !i.revokedAt) : undefined;
-    const session: Session = { user: DEMO_USER, role: invite?.role ?? 'admin' };
+    const session: Session = { user: DEMO_USER, role: invite?.role ?? 'admin', treeId: LOCAL_TREE_ID };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     this.listeners.forEach(cb => cb(session));
     return session;
@@ -113,7 +141,8 @@ class LocalRepository implements Repository {
     return {
       treeId: LOCAL_TREE_ID,
       treeName: SEED_TREE_NAME,
-      originNotes: '',
+      originPlace: '',
+      originCountry: '',
       rootId: SEED_ROOT_ID,
       // Deep copy so store mutations never write back into the seed module.
       persons: SEED_PERSONS.map(p => ({ ...p, archives: [...p.archives], media: [...p.media] })),
@@ -122,7 +151,9 @@ class LocalRepository implements Repository {
   }
 
   async listTrees() { return [{ id: LOCAL_TREE_ID, name: SEED_TREE_NAME }]; }
-  async createTree() { return LOCAL_TREE_ID; }
+  // A fresh id per call, so creating a second tree in demo mode does not
+  // collide with the seeded one.
+  async createTree() { return `local-${randomToken()}`; }
 
   async createPerson(_treeId: string, p: Person) { return p; }
   async updatePerson() {}
@@ -131,9 +162,14 @@ class LocalRepository implements Repository {
   async updateUnion() {}
   async addChild() {}
   async removeUnionPartner() {}
-  async addArchive() {}
+  async addArchive(_treeId: string, _personId: string, a: Archive, file: File | null) {
+    // Demo mode keeps the file in memory only, as an object URL.
+    return file ? { ...a, filePath: URL.createObjectURL(file), fileName: file.name } : a;
+  }
+  async deleteArchive() {}
   async addMedia() {}
-  async setPhoto(_personId: string, dataUrl: string | null) { return dataUrl; }
+  async setPhoto(_treeId: string, _personId: string, dataUrl: string | null) { return dataUrl; }
+  async signedUrl(stored: string) { return stored || null; }
 
   async listInvites() { return this.invites; }
 
@@ -147,6 +183,13 @@ class LocalRepository implements Repository {
     this.invites = this.invites.map(i =>
       i.token === token ? { ...i, revokedAt: new Date().toISOString() } : i,
     );
+  }
+
+  async redeemInvite(token: string): Promise<string> {
+    const inv = this.invites.find(i => i.token === token);
+    if (!inv) throw new Error('This invite link is not valid');
+    if (inv.revokedAt) throw new Error('This invite link has been revoked');
+    return inv.treeId;
   }
 }
 
@@ -207,8 +250,6 @@ class SupabaseRepository implements Repository {
       .limit(1)
       .maybeSingle();
 
-    if (!m) return null; // authenticated but not a member of any tree
-
     const meta = authUser.user_metadata ?? {};
     return {
       user: {
@@ -217,7 +258,11 @@ class SupabaseRepository implements Repository {
         name: (meta.full_name as string) ?? (meta.name as string) ?? authUser.email ?? '',
         pictureUrl: (meta.avatar_url as string) ?? undefined,
       },
-      role: m.role as Role,
+      // No membership row is a valid, expected state for a brand-new user: they
+      // are signed in with no archive yet. Returning null here would bounce them
+      // back to the sign-in screen in a loop.
+      role: (m?.role as Role) ?? 'admin',
+      treeId: m?.tree_id ?? null,
     };
   }
 
@@ -247,10 +292,12 @@ class SupabaseRepository implements Repository {
   async loadTree(treeId?: string): Promise<TreeSnapshot> {
     const sb = requireSupabase();
 
+    if (!treeId) throw new Error('No family archive selected.');
+
     const { data: tree, error: te } = await sb
       .from('trees')
-      .select('id, name, origin_notes, root_person_id')
-      .eq(treeId ? 'id' : 'id', treeId ?? '')
+      .select('id, name, origin_place, origin_country, root_person_id')
+      .eq('id', treeId)
       .maybeSingle();
     if (te) throw te;
     if (!tree) throw new Error('Tree not found or you are not a member of it.');
@@ -269,7 +316,12 @@ class SupabaseRepository implements Repository {
     const archivesBy = new Map<string, Archive[]>();
     (aRows ?? []).forEach(a => {
       const list = archivesBy.get(a.person_id) ?? [];
-      list.push({ id: a.id, title: a.title, year: a.year, category: a.category, desc: a.descr, origin: a.origin });
+      list.push({
+        id: a.id, title: a.title, year: a.year, category: a.category,
+        desc: a.descr, origin: a.origin,
+        filePath: a.file_url ?? undefined,
+        fileName: a.file_url ? displayName(a.file_url) : undefined,
+      });
       archivesBy.set(a.person_id, list);
     });
 
@@ -304,7 +356,8 @@ class SupabaseRepository implements Repository {
     return {
       treeId: tree.id,
       treeName: tree.name,
-      originNotes: tree.origin_notes,
+      originPlace: tree.origin_place,
+      originCountry: tree.origin_country,
       rootId: tree.root_person_id ?? persons[0]?.id ?? '',
       persons,
       unions,
@@ -318,21 +371,15 @@ class SupabaseRepository implements Repository {
     return data ?? [];
   }
 
-  async createTree(name: string, originNotes: string): Promise<string> {
+  async createTree(name: string, place: string, country: string): Promise<string> {
     const sb = requireSupabase();
-    const { data: u } = await sb.auth.getUser();
-    if (!u.user) throw new Error('Not signed in.');
-
-    const { data, error } = await sb
-      .from('trees')
-      .insert({ name, origin_notes: originNotes, created_by: u.user.id })
-      .select('id')
-      .single();
+    // Goes through an RPC rather than two inserts because neither can satisfy
+    // the other's RLS from the client: selecting the new tree row needs a
+    // membership that does not exist yet, and inserting that membership needs
+    // an admin that does not exist yet. create_tree() does both as definer.
+    const { data, error } = await sb.rpc('create_tree', { tree_name: name, place, country });
     if (error) throw error;
-
-    // Creator becomes the first admin.
-    await sb.from('memberships').insert({ tree_id: data.id, user_id: u.user.id, role: 'admin' });
-    return data.id;
+    return data as string;
   }
 
   async createPerson(treeId: string, p: Person): Promise<Person> {
@@ -390,12 +437,49 @@ class SupabaseRepository implements Repository {
     if (error) throw error;
   }
 
-  async addArchive(personId: string, a: Archive): Promise<void> {
-    const { error } = await requireSupabase().from('archive_records').insert({
+  async addArchive(treeId: string, personId: string, a: Archive, file: File | null): Promise<Archive> {
+    const sb = requireSupabase();
+    let filePath: string | undefined;
+
+    if (file) {
+      const path = `${treeId}/${personId}/${objectName(file.name)}`;
+      const { error: ue } = await sb.storage.from('archives').upload(path, file, {
+        contentType: file.type || 'application/octet-stream',
+      });
+      if (ue) throw ue;
+      filePath = `archives/${path}`;
+    }
+
+    // Insert only after the upload succeeds, so a failed upload never leaves a
+    // record pointing at a file that isn't there.
+    const { data, error } = await sb.from('archive_records').insert({
       person_id: personId, title: a.title, year: a.year,
       category: a.category, descr: a.desc, origin: a.origin,
-    });
+      file_url: filePath ?? null,
+    }).select('id').single();
     if (error) throw error;
+
+    return {
+      ...a,
+      id: data.id as string,
+      filePath,
+      fileName: file?.name,
+    };
+  }
+
+  async deleteArchive(a: Archive): Promise<void> {
+    const sb = requireSupabase();
+    // Row first, file second. If the file removal fails we have only orphaned
+    // some storage; the reverse order would leave a record pointing at nothing.
+    const { error } = await sb.from('archive_records').delete().eq('id', a.id);
+    if (error) throw error;
+
+    if (a.filePath) {
+      const slash = a.filePath.indexOf('/');
+      if (slash > 0) {
+        await sb.storage.from(a.filePath.slice(0, slash)).remove([a.filePath.slice(slash + 1)]);
+      }
+    }
   }
 
   async addMedia(personId: string, m: MediaItem): Promise<void> {
@@ -405,21 +489,40 @@ class SupabaseRepository implements Repository {
     if (error) throw error;
   }
 
-  async setPhoto(personId: string, dataUrl: string | null): Promise<string | null> {
+  async setPhoto(treeId: string, personId: string, dataUrl: string | null): Promise<string | null> {
     const sb = requireSupabase();
     if (!dataUrl) {
-      await sb.from('persons').update({ photo_url: null }).eq('id', personId);
+      const { error } = await sb.from('persons').update({ photo_url: null }).eq('id', personId);
+      if (error) throw error;
       return null;
     }
     const blob = await (await fetch(dataUrl)).blob();
-    const path = `${personId}/${Date.now()}.jpg`;
+    // Tree id must be the first path segment — the storage policies read it to
+    // decide membership. This previously started with the person id, so every
+    // upload was rejected by RLS.
+    const path = `${treeId}/${personId}/${Date.now()}.jpg`;
     const { error: ue } = await sb.storage.from('photos').upload(path, blob, {
       contentType: 'image/jpeg', upsert: true,
     });
     if (ue) throw ue;
-    const { data } = sb.storage.from('photos').getPublicUrl(path);
-    await sb.from('persons').update({ photo_url: data.publicUrl }).eq('id', personId);
-    return data.publicUrl;
+
+    // The path, not a URL: the bucket is private and getPublicUrl() here
+    // returned a link that would never load.
+    const stored = `photos/${path}`;
+    const { error } = await sb.from('persons').update({ photo_url: stored }).eq('id', personId);
+    if (error) throw error;
+    return stored;
+  }
+
+  async signedUrl(stored: string): Promise<string | null> {
+    if (!stored) return null;
+    if (/^(https?:|data:|blob:)/.test(stored)) return stored;
+    const slash = stored.indexOf('/');
+    if (slash < 1) return null;
+    const { data, error } = await requireSupabase()
+      .storage.from(stored.slice(0, slash))
+      .createSignedUrl(stored.slice(slash + 1), 60 * 60);
+    return error ? null : data.signedUrl;
   }
 
   async listInvites(treeId: string): Promise<Invite[]> {
@@ -451,6 +554,19 @@ class SupabaseRepository implements Repository {
     const { error } = await requireSupabase()
       .from('invites').update({ revoked_at: new Date().toISOString() }).eq('token', token);
     if (error) throw error;
+  }
+
+  /**
+   * Goes through the RPC, not a membership insert: RLS forbids self-inserting a
+   * membership precisely so nobody can grant themselves admin. redeem_invite()
+   * reads the role from the stored invite row, so the ?role= on the link is
+   * decoration and cannot be tampered with.
+   */
+  async redeemInvite(token: string): Promise<string> {
+    const sb = requireSupabase();
+    const { data, error } = await sb.rpc('redeem_invite', { invite_token: token });
+    if (error) throw error;
+    return data as string;
   }
 }
 

@@ -1,5 +1,8 @@
 import type { Person, Union } from '../types';
-import { spousesOf, parentsOf, unionsOf, fullName } from './kinship';
+import { spousesOf, parentsOf, unionsOf, fullName, initials } from './kinship';
+import { computeLayout } from './layout';
+import { palette } from './palette';
+import { lifeDates } from './dates';
 
 interface TreeData { persons: Person[]; unions: Union[]; }
 
@@ -102,52 +105,105 @@ function esc(s: string): string {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch] as string));
 }
 
+/** Card geometry from the layout engine. Node x/y is the card's top-left. */
+const CARD = { W: 280, H: 264 };
+
+/** Trims to a width that fits the card, since SVG text does not wrap. */
+function clip(s: string, max: number): string {
+  const t = String(s ?? '').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function cardSvg(p: Person, x: number, y: number): string {
+  const c = palette(p.gender);
+  const cx = x + CARD.W / 2;
+  const dates = lifeDates(p.dob, p.dod);
+
+  return `
+    <g>
+      <rect x="${x}" y="${y}" width="${CARD.W}" height="${CARD.H}" rx="20"
+            fill="${c.fill}" stroke="${c.border}" stroke-width="1.6" />
+      <circle cx="${cx}" cy="${y + 66}" r="34" fill="${c.avFill}" />
+      <text x="${cx}" y="${y + 66}" text-anchor="middle" dominant-baseline="central"
+            font-size="25" font-weight="800" fill="${c.avText}">${esc(initials(p))}</text>
+      <text x="${cx}" y="${y + 133}" text-anchor="middle"
+            font-size="19" font-weight="800" fill="#1C1917">${esc(clip(fullName(p), 26))}</text>
+      ${p.label ? `<text x="${cx}" y="${y + 158}" text-anchor="middle"
+            font-size="11" font-weight="700" letter-spacing="0.9" fill="${c.accent}">${esc(clip(p.label.toUpperCase(), 26))}</text>` : ''}
+      ${dates ? `<text x="${cx}" y="${y + 184}" text-anchor="middle"
+            font-size="13.5" font-weight="600" fill="#57534E">${esc(dates)}</text>` : ''}
+      ${p.pob ? `<text x="${cx}" y="${y + 207}" text-anchor="middle"
+            font-size="11.5" fill="#78716C">${esc(clip(p.pob, 32))}</text>` : ''}
+      ${p.occupation ? `<text x="${cx}" y="${y + 229}" text-anchor="middle"
+            font-size="11" font-style="italic" fill="#A8A29E">${esc(clip(p.occupation, 34))}</text>` : ''}
+    </g>`;
+}
+
 /**
- * Opens a print-optimised A4 landscape sheet and calls print(). Returns false
- * if the popup was blocked so the caller can surface a notice.
+ * Opens a print-optimised sheet showing the tree itself and calls print().
+ * Returns false if the popup was blocked so the caller can surface a notice.
+ *
+ * The structure is the point here — the flat per-person table is what Excel is
+ * for, and exporting the same table twice made one of the two formats useless.
  */
 export function exportPdf(data: TreeData, treeName: string): boolean {
-  const rows = exportRows(data);
   const today = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const cols: Array<[string, keyof Row]> = [
-    ['Name', 'name'], ['Gender', 'gender'], ['Relation', 'relation'],
-    ['DOB', 'dob'], ['POB', 'pob'], ['DOD', 'dod'],
-    ['Occupation', 'occupation'], ['Father', 'father'], ['Mother', 'mother'], ['Spouse(s)', 'spouses'],
-  ];
+  // Nothing collapsed and admin off: a print-out should show the whole family,
+  // not whatever happens to be expanded on screen, and no "+ Add" affordances.
+  const layout = computeLayout(data, {}, null, false, null);
+  const { nodes, links, conns, w: treeW, h: treeH } = layout;
+
+  const byId = new Map(data.persons.map(p => [p.id, p]));
+  const landscape = treeW >= treeH;
+
+  const body = nodes.length
+    ? `<svg viewBox="0 0 ${treeW} ${treeH}" xmlns="http://www.w3.org/2000/svg">
+        <g fill="none" stroke-linecap="round">
+          ${links.filter(l => !l.hidden).map(l =>
+            `<path d="${l.d}" stroke="${l.stroke}" stroke-width="${l.w}" />`).join('')}
+        </g>
+        ${conns.map(cn => {
+          const midX = cn.x + cn.w / 2;
+          return `<g>
+            <path d="M${cn.x} ${cn.y} H${cn.x + cn.w}" stroke="#D6CFC7" stroke-width="2" fill="none" />
+            ${cn.hasDate ? `<rect x="${midX - 52}" y="${cn.y - 12}" width="104" height="24" rx="12" fill="#FFFDFB" stroke="#E7E2DC" />
+            <text x="${midX}" y="${cn.y}" text-anchor="middle" dominant-baseline="central"
+                  font-size="11.5" font-weight="700" fill="#78716C">${esc(clip(cn.date, 16))}</text>` : ''}
+          </g>`;
+        }).join('')}
+        ${nodes.map(n => {
+          const p = byId.get(n.id);
+          return p ? cardSvg(p, n.x, n.y) : '';
+        }).join('')}
+      </svg>`
+    : `<p class="empty">This archive has no members yet.</p>`;
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>${esc(treeName)} Family Tree</title>
 <style>
-  @page { size: A4 landscape; margin: 14mm; }
+  @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; }
   * { box-sizing: border-box; }
   body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: #1C1917; margin: 0; }
-  h1 { font-size: 20px; letter-spacing: -0.02em; margin: 0 0 2px; }
-  .sub { font-size: 11px; color: #78716C; margin-bottom: 14px; }
-  table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-  th { text-align: left; background: #FAF7F3; border-bottom: 1.5px solid #E7E2DC;
-       padding: 6px 5px; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: #57534E; }
-  td { padding: 5px; border-bottom: 1px solid #F3EFEA; vertical-align: top; }
-  tr { break-inside: avoid; }
-  thead { display: table-header-group; }
+  h1 { font-size: 19px; letter-spacing: -0.02em; margin: 0 0 2px; }
+  .sub { font-size: 10.5px; color: #78716C; margin-bottom: 10px; }
+  .empty { font-size: 12px; color: #78716C; }
+  /* The viewBox preserves the aspect ratio; max-height keeps the whole tree on
+     a single sheet rather than slicing it across page breaks. */
+  svg { display: block; width: 100%; height: auto; max-height: ${landscape ? '172mm' : '250mm'}; }
 </style></head>
 <body>
   <h1>${esc(treeName)} Family Tree</h1>
-  <div class="sub">${rows.length} individuals · exported ${esc(today)}</div>
-  <table>
-    <thead><tr>${cols.map(c => `<th>${esc(c[0])}</th>`).join('')}</tr></thead>
-    <tbody>
-      ${rows.map(r => `<tr>${cols.map(c => `<td>${esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}
-    </tbody>
-  </table>
+  <div class="sub">${data.persons.length} individuals · exported ${esc(today)}</div>
+  ${body}
 </body></html>`;
 
-  const w = window.open('', '_blank');
-  if (!w) return false;
-  w.document.write(html);
-  w.document.close();
-  w.focus();
+  const win = window.open('', '_blank');
+  if (!win) return false;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
   // Let fonts and layout settle before the print dialog steals the thread.
-  setTimeout(() => w.print(), 350);
+  setTimeout(() => win.print(), 350);
   return true;
 }

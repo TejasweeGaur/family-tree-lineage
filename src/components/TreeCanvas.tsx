@@ -99,11 +99,16 @@ export function TreeCanvas() {
     <div
       ref={scrollerRef}
       className="canvas-bg"
-      style={{ position: 'absolute', inset: 0, overflow: 'auto', cursor: mode === 'drag' ? 'grab' : 'default' }}
+      style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', cursor: mode === 'drag' ? 'grab' : 'default' }}
       onMouseDown={onPanStart}
       onClick={() => { setFocus(null); setBranch(null); closeAllMenus(); }}
     >
-      <div style={{ position: 'relative', width: Math.round(canvasW * zoom), height: Math.round(canvasH * zoom) }}>
+      {/*
+        `margin: auto` on a flex child centres a small tree on both axes while
+        still letting a large one scroll to its true edges. Using
+        justify-content/align-items instead would clip the overflowing start.
+      */}
+      <div style={{ position: 'relative', flexShrink: 0, margin: 'auto', width: Math.round(canvasW * zoom), height: Math.round(canvasH * zoom) }}>
         <div style={{ position: 'absolute', top: 0, left: 0, transform: `scale(${zoom})`, transformOrigin: '0 0', width: canvasW, height: canvasH }}>
 
           <svg width={canvasW} height={canvasH} style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible' }}>
