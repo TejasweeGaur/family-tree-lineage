@@ -15,6 +15,7 @@ import { PlusMenu } from './components/PlusMenu';
 import { SignInScreen } from './components/SignInScreen';
 import { CreateTreeScreen } from './components/CreateTreeScreen';
 import { CsvImportDialog } from './components/CsvImportDialog';
+import { PhotoLightbox } from './components/PhotoLightbox';
 import { AddMemberDialog } from './components/AddMemberDialog';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 
@@ -39,6 +40,7 @@ function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       const s = useTreeStore.getState();
+      if (s.photoView) return s.closePhotoView();
       if (s.viewerRecord) return s.closeViewer();
       if (s.confirmDeleteId) return s.cancelDelete();
       if (s.archiveForm) return s.closeArchiveForm();
@@ -109,6 +111,7 @@ function App() {
       <InviteModal />
       <NewTreeModal />
       <CsvImportDialog />
+      <PhotoLightbox />
       <PlusMenu />
       <NoticeToast />
     </div>

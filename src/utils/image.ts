@@ -1,4 +1,5 @@
-const MAX_EDGE = 320;
+// 800px, not 320: avatars can now be opened full-screen, where 320 looks soft.
+const MAX_EDGE = 800;
 const JPEG_QUALITY = 0.86;
 
 /**
@@ -35,9 +36,9 @@ export function readScaledPhoto(file: File, maxEdge = 1600): Promise<Blob> {
 }
 
 /**
- * Reads a picked image, centre-crops it square and downscales it to a 320px
- * JPEG data URL. Keeps avatars small enough to store inline in demo mode and
- * cheap to upload once Supabase storage is wired in.
+ * Reads a picked image, centre-crops it square and downscales it to an 800px
+ * JPEG data URL, roughly 60-120 KB. Large enough to look sharp in the
+ * full-screen photo viewer, small enough to be cheap to store.
  */
 export function readSquarePhoto(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

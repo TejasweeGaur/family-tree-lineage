@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { palette } from '../utils/palette';
 import { lifeDates, lifeSpanLong, ageLabel, fmtDate, shortDate } from '../utils/dates';
@@ -128,9 +128,39 @@ function HeroSection({ person }: { person: Person; data: Data }) {
   const openArchiveForm = useTreeStore(s => s.openArchiveForm);
   const setPhoto = useTreeStore(s => s.setPhoto);
   const setNotice = useTreeStore(s => s.setNotice);
+  const openPhotoView = useTreeStore(s => s.openPhotoView);
   const fileRef = useRef<HTMLInputElement>(null);
   const photoSrc = useSignedUrl(person.photoUrl);
   const c = palette(person.gender);
+  const hasPhoto = !!person.photoUrl;
+
+  // Keyed on the person, so switching profiles never leaves the menu open.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const menuOpen = menuFor === person.id;
+  const closeMenu = () => { setMenuFor(null); setConfirmRemove(false); };
+
+  // Esc closes just this menu, not the whole panel behind it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      setMenuFor(null);
+      setConfirmRemove(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [menuOpen]);
+
+  const onAvatar = () => {
+    // With no photo there is nothing to view, so admins go straight to picking one.
+    if (hasPhoto) { setConfirmRemove(false); setMenuFor(menuOpen ? null : person.id); }
+    else if (isAdmin) fileRef.current?.click();
+  };
+  const avatarLabel = hasPhoto
+    ? `Photo options for ${fullName(person)}`
+    : isAdmin ? `Add a photo of ${fullName(person)}` : undefined;
 
   const pickPhoto = async (file?: File) => {
     if (!file) return;
@@ -145,16 +175,22 @@ function HeroSection({ person }: { person: Person; data: Data }) {
   return (
     <div style={{ padding: '22px 24px 20px', background: heroBg, borderBottom: '1px solid rgba(28,25,23,.07)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
-        {/* Avatar — admins get a camera overlay on hover to swap the photo */}
-        <div
+        {/* Avatar — tapping a photo offers view / replace / remove */}
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          type="button"
           className={isAdmin ? 'avatar-editable' : undefined}
-          onClick={isAdmin ? () => fileRef.current?.click() : undefined}
+          onClick={onAvatar}
+          disabled={!hasPhoto && !isAdmin}
+          aria-label={avatarLabel}
+          aria-haspopup={hasPhoto ? 'menu' : undefined}
+          aria-expanded={hasPhoto ? menuOpen : undefined}
           style={{
-            width: 82, height: 82, borderRadius: '50%', flexShrink: 0,
+            width: 82, height: 82, borderRadius: '50%', padding: 0, border: 'none',
             background: photoSrc ? 'transparent' : c.avFill,
             boxShadow: '0 0 0 4px #fff, 0 3px 10px rgba(28,25,23,.12)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-            overflow: 'hidden', cursor: isAdmin ? 'pointer' : 'default',
+            overflow: 'hidden', cursor: hasPhoto || isAdmin ? 'pointer' : 'default', fontFamily: 'inherit',
           }}
         >
           {photoSrc
@@ -177,6 +213,44 @@ function HeroSection({ person }: { person: Person; data: Data }) {
           }}>
             {c.glyph}
           </span>
+        </button>
+
+        {menuOpen && (
+          <>
+            {/* Transparent catcher: any click outside the menu dismisses it. */}
+            <div onClick={closeMenu} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />
+            <div role="menu" style={{
+              position: 'absolute', top: 90, left: 0, zIndex: 31, width: 190,
+              background: '#fff', border: '1px solid #E7E2DC', borderRadius: 13,
+              boxShadow: '0 18px 44px rgba(28,25,23,.18)', padding: 6,
+            }}>
+              <MenuItem
+                label="View photo"
+                icon={<><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>}
+                onClick={() => { closeMenu(); openPhotoView(person.photoUrl!, fullName(person)); }}
+              />
+              {isAdmin && (
+                <>
+                  <MenuItem
+                    label="Replace photo"
+                    icon={<><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.2" /></>}
+                    onClick={() => { closeMenu(); fileRef.current?.click(); }}
+                  />
+                  <MenuItem
+                    label={confirmRemove ? 'Tap again to remove' : 'Remove photo'}
+                    danger
+                    icon={<path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" />}
+                    // Two-step: removing deletes the stored file for good.
+                    onClick={() => {
+                      if (confirmRemove) { closeMenu(); setPhoto(person.id, null); }
+                      else setConfirmRemove(true);
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          </>
+        )}
         </div>
         {isAdmin && (
           <input
@@ -248,21 +322,27 @@ function HeroSection({ person }: { person: Person; data: Data }) {
             </svg>
             Upload Archives
           </button>
-          {person.photoUrl && (
-            <button
-              type="button"
-              onClick={() => setPhoto(person.id, null)}
-              style={{
-                border: 'none', background: 'none', padding: '9px 4px', cursor: 'pointer',
-                fontSize: 12.5, fontWeight: 700, color: '#B91C1C', fontFamily: 'inherit',
-              }}
-            >
-              Remove photo
-            </button>
-          )}
         </div>
       )}
     </div>
+  );
+}
+
+function MenuItem({ label, icon, onClick, danger }: {
+  label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean;
+}) {
+  return (
+    <button type="button" role="menuitem" onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none',
+      cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+      fontSize: 13, fontWeight: 600, color: danger ? '#B91C1C' : '#292524',
+    }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {icon}
+      </svg>
+      {label}
+    </button>
   );
 }
 

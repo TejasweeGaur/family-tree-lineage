@@ -582,28 +582,41 @@ class SupabaseRepository implements Repository {
 
   async setPhoto(treeId: string, personId: string, dataUrl: string | null): Promise<string | null> {
     const sb = requireSupabase();
-    if (!dataUrl) {
-      const { error } = await sb.from('persons').update({ photo_url: null }).eq('id', personId);
-      if (error) throw error;
-      return null;
-    }
-    const blob = await (await fetch(dataUrl)).blob();
-    // Tree id must be the first path segment — the storage policies read it to
-    // decide membership. This previously started with the person id, so every
-    // upload was rejected by RLS.
-    const path = `${treeId}/${personId}/${Date.now()}.jpg`;
-    const { error: ue } = await sb.storage.from('photos').upload(path, blob, {
-      contentType: 'image/jpeg', upsert: true,
-    });
-    if (ue) throw ue;
 
-    // The path, not a URL: the bucket is private and getPublicUrl() here
-    // returned a link that would never load.
-    const stored = `photos/${path}`;
+    // Read the current photo first so it can be removed once replaced. Each
+    // upload gets a fresh name, so without this every change or removal left
+    // the old file in the bucket, quietly eating the free-tier quota.
+    const { data: current } = await sb.from('persons').select('photo_url').eq('id', personId).single();
+    const previous = (current?.photo_url as string | null) ?? null;
+
+    let stored: string | null = null;
+    let uploaded: string | null = null;
+    if (dataUrl) {
+      const blob = await (await fetch(dataUrl)).blob();
+      // Tree id must be the first path segment — the storage policies read it
+      // to decide membership.
+      uploaded = `${treeId}/${personId}/${Date.now()}.jpg`;
+      const { error: ue } = await sb.storage.from('photos').upload(uploaded, blob, {
+        contentType: 'image/jpeg', upsert: true,
+      });
+      if (ue) throw ue;
+      // The path, not a URL: the bucket is private, so URLs are signed on read.
+      stored = `photos/${uploaded}`;
+    }
+
     const { error } = await sb.from('persons').update({ photo_url: stored }).eq('id', personId);
-    if (error) throw error;
+    if (error) {
+      if (uploaded) await sb.storage.from('photos').remove([uploaded]);
+      throw error;
+    }
+
+    // Only now that nothing references it is the old file safe to delete.
+    if (previous && previous !== stored && previous.startsWith('photos/')) {
+      await sb.storage.from('photos').remove([previous.slice('photos/'.length)]);
+    }
     return stored;
   }
+
 
   async signedUrl(stored: string): Promise<string | null> {
     if (!stored) return null;

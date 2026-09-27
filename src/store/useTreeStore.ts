@@ -102,6 +102,8 @@ interface AppState {
   copied: boolean;
   newTreeOpen: boolean;
   viewerRecord: ViewerRecord | null;
+  /** Full-screen profile photo viewer: the stored path plus whose it is. */
+  photoView: { stored: string; name: string } | null;
   /** A parsed, validated CSV awaiting confirmation. Nothing is written yet. */
   csvPlan: (ImportPlan & { fileName: string }) | null;
   csvImporting: boolean;
@@ -242,6 +244,8 @@ type Store = AppState & {
   // Viewer
   openViewer: (record: ViewerRecord) => void;
   closeViewer: () => void;
+  openPhotoView: (stored: string, name: string) => void;
+  closePhotoView: () => void;
 
   // Invites
   setInviteOpen: (v: boolean) => void;
@@ -325,6 +329,7 @@ export const useTreeStore = create<Store>((set, get) => ({
   copied: false,
   newTreeOpen: false,
   viewerRecord: null,
+  photoView: null,
   csvPlan: null,
   csvImporting: false,
 
@@ -1093,6 +1098,8 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   openViewer: record => set({ viewerRecord: record }),
   closeViewer: () => set({ viewerRecord: null }),
+  openPhotoView: (stored, name) => set({ photoView: { stored, name } }),
+  closePhotoView: () => set({ photoView: null }),
 
   // ---------------------------------------------------------------- invites
 
