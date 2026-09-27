@@ -13,6 +13,9 @@ export function ArchiveForm() {
 
   const person = store.persons.find(p => p.id === archiveForm.targetId);
   const canSave = !!archiveForm.title && !savingArchive;
+  const isEdit = !!archiveForm.editId;
+  // Editing a record whose file is kept as-is: we have its name, not its bytes.
+  const keepingExisting = isEdit && !archiveForm.fileData && !!archiveForm.file;
 
   const pick = (f: File | null) => {
     if (!f) return;
@@ -58,7 +61,9 @@ export function ArchiveForm() {
             </svg>
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.018em' }}>Archive Historical Document / Photo</div>
+            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.018em' }}>
+              {isEdit ? 'Edit Archive Record' : 'Archive Historical Document / Photo'}
+            </div>
             {person && <div style={{ fontSize: 12, color: '#8A817A', marginTop: 2 }}>For {person.first} {person.last}</div>}
           </div>
           <button type="button" onClick={store.closeArchiveForm} aria-label="Close" style={iconBtn}>
@@ -112,6 +117,23 @@ export function ArchiveForm() {
                   fontSize: 11.5, fontWeight: 700, color: '#B91C1C', cursor: 'pointer', fontFamily: 'inherit',
                 }}>Remove</button>
               </div>
+            ) : keepingExisting ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', color: '#A8A29E' }}>CURRENT FILE</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#44403C', marginTop: 5, wordBreak: 'break-all' }}>
+                  {archiveForm.file}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+                  <button type="button" onClick={() => fileRef.current?.click()} style={{
+                    padding: '7px 13px', borderRadius: 9, border: 'none',
+                    background: '#1C1917', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                  }}>Replace</button>
+                  <button type="button" onClick={clearFile} style={{
+                    padding: '7px 13px', borderRadius: 9, border: '1px solid #E7E2DC', background: '#fff',
+                    color: '#B91C1C', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                  }}>Remove</button>
+                </div>
+              </div>
             ) : (
               <>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>Drag and drop a scan or photo here</div>
@@ -161,7 +183,7 @@ export function ArchiveForm() {
             padding: '10px 20px', borderRadius: 10, border: 'none',
             background: canSave ? '#C2410C' : '#A8A29E', color: '#fff',
             cursor: canSave ? 'pointer' : 'not-allowed', fontSize: 12.5, fontWeight: 700,
-          }}>{savingArchive ? 'Saving…' : 'Save to Archives'}</button>
+          }}>{savingArchive ? 'Saving…' : isEdit ? 'Save Changes' : 'Save to Archives'}</button>
         </div>
       </div>
     </div>

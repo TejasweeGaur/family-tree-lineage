@@ -215,6 +215,8 @@ export interface ArchiveFormState {
   file: string;
   /** The actual file to upload; null until one is picked. */
   fileData: File | null;
+  /** Set when editing an existing record rather than adding one. */
+  editId?: string;
 }
 
 export type DirSortKey = 'name' | 'dob' | 'label';

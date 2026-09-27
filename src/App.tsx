@@ -14,6 +14,7 @@ import { NoticeToast } from './components/NoticeToast';
 import { PlusMenu } from './components/PlusMenu';
 import { SignInScreen } from './components/SignInScreen';
 import { CreateTreeScreen } from './components/CreateTreeScreen';
+import { CsvImportDialog } from './components/CsvImportDialog';
 import { AddMemberDialog } from './components/AddMemberDialog';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 
@@ -44,6 +45,7 @@ function App() {
       if (s.form) return s.closeForm();
       if (s.addDialog) return s.closeAddDialog();
       if (s.inviteOpen) return s.setInviteOpen(false);
+      if (s.csvPlan) return s.closeCsvImport();
       if (s.newTreeOpen) return s.setNewTreeOpen(false);
       if (s.panel) return s.closePanel();
       s.closeAllMenus();
@@ -106,6 +108,7 @@ function App() {
       <DocumentViewer />
       <InviteModal />
       <NewTreeModal />
+      <CsvImportDialog />
       <PlusMenu />
       <NoticeToast />
     </div>

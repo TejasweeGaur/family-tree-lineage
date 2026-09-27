@@ -49,6 +49,10 @@ export function AppHeader() {
     : [];
 
   const headerRef = useRef<HTMLElement>(null);
+  const csvRef = useRef<HTMLInputElement>(null);
+  const exportCsv = useTreeStore(s => s.exportCsv);
+  const downloadCsvTemplate = useTreeStore(s => s.downloadCsvTemplate);
+  const openCsvImport = useTreeStore(s => s.openCsvImport);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (headerRef.current && !headerRef.current.contains(e.target as Node)) closeHeaderMenus();
@@ -316,10 +320,27 @@ export function AppHeader() {
                 </>
               )}
             </button>
+            {/* Outside the menu so it survives the menu closing on click. */}
+            <input
+              ref={csvRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={e => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (f) void openCsvImport(f);
+              }}
+            />
             {dataMenu && (
               <div style={{ position: 'absolute', top: 46, right: 0, width: 222, background: '#fff', border: '1px solid #E7E2DC', borderRadius: 14, boxShadow: '0 18px 44px rgba(28,25,23,.14)', padding: 7, zIndex: 60 }}>
-                {['Import CSV', 'Export CSV', 'Download CSV template'].map(label => (
-                  <button key={label} type="button" onClick={() => { setDataMenu(false); setNotice(`${label} is not available yet`); }} style={{ display: 'block', width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left', color: '#292524', fontFamily: 'inherit' }}>
+                {(['Import CSV', 'Export CSV', 'Download CSV template'] as const).map(label => (
+                  <button key={label} type="button" onClick={() => {
+                    setDataMenu(false);
+                    if (label === 'Import CSV') csvRef.current?.click();
+                    else if (label === 'Export CSV') exportCsv();
+                    else downloadCsvTemplate();
+                  }} style={{ display: 'block', width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left', color: '#292524', fontFamily: 'inherit' }}>
                     {label}
                   </button>
                 ))}

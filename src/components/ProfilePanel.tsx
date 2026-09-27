@@ -6,7 +6,7 @@ import { initials, fullName, parentsOf, siblingsOf, unionsOf, kinSentence, kinPa
 import { renderMarkdown } from '../utils/markdown';
 import { readSquarePhoto } from '../utils/image';
 import { useSignedUrl } from '../hooks/useSignedUrl';
-import type { Person, Union, Archive, ViewerRecord } from '../types';
+import type { Person, Union, Archive, MediaItem, ViewerRecord } from '../types';
 
 type Data = { persons: Person[]; unions: Union[] };
 
@@ -311,6 +311,9 @@ function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]
   const openAdd = useTreeStore(s => s.openAdd);
   const setKinTarget = useTreeStore(s => s.setKinTarget);
   const persons = useTreeStore(s => s.persons);
+  const unlinkSpouse = useTreeStore(s => s.unlinkSpouse);
+  // Which spouse row has its Unlink armed; the second click confirms.
+  const [armed, setArmed] = useState<string | null>(null);
 
   const parents = parentsOf(data, person.id);
   const father = parents.map(id => persons.find(p => p.id === id)).find(p => p?.gender === 'Male');
@@ -376,10 +379,26 @@ function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]
                   </span>
                 </span>
                 {admin && (
-                  <button type="button" onClick={e => { e.stopPropagation(); }} style={{
-                    flexShrink: 0, padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(28,25,23,.14)',
-                    background: 'rgba(255,255,255,.7)', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#78716C',
-                  }}>Unlink</button>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (armed === sp.id) {
+                        setArmed(null);
+                        void unlinkSpouse(person.id, sp.id);
+                      } else {
+                        setArmed(sp.id);
+                      }
+                    }}
+                    onBlur={() => setArmed(a => (a === sp.id ? null : a))}
+                    style={{
+                      flexShrink: 0, padding: '5px 10px', borderRadius: 8,
+                      border: armed === sp.id ? '1px solid #B91C1C' : '1px solid rgba(28,25,23,.14)',
+                      background: armed === sp.id ? '#B91C1C' : 'rgba(255,255,255,.7)',
+                      color: armed === sp.id ? '#fff' : '#78716C',
+                      cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
+                    }}
+                  >{armed === sp.id ? 'Unlink?' : 'Unlink'}</button>
                 )}
               </div>
             );
@@ -438,6 +457,9 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
   const openEdit = useTreeStore(s => s.openEdit);
   const openViewer = useTreeStore(s => s.openViewer);
   const panelMode = useTreeStore(s => s.panelMode);
+  const addMediaPhotos = useTreeStore(s => s.addMediaPhotos);
+  const mediaUpload = useTreeStore(s => s.mediaUpload);
+  const mediaRef = useRef<HTMLInputElement>(null);
   const tileCols = panelMode === 'modal' ? 4 : 2;
 
   // Timeline
@@ -491,37 +513,44 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E' }}>LIFE MEDIA GALLERY ({person.media.length})</span>
           {admin && (
-            <button type="button" onClick={() => openEdit(person.id)} style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, fontWeight: 800, color: '#C2410C' }}>
-              + Manage Media
-            </button>
+            <>
+              <input
+                ref={mediaRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  void addMediaPhotos(person.id, files);
+                }}
+              />
+              {/* This used to call openEdit() — "Manage Media" opened the person form. */}
+              <button
+                type="button"
+                disabled={!!mediaUpload}
+                onClick={() => mediaRef.current?.click()}
+                style={{ border: 'none', background: 'none', padding: 0, cursor: mediaUpload ? 'default' : 'pointer', fontSize: 11.5, fontWeight: 800, color: mediaUpload ? '#A8A29E' : '#C2410C', fontFamily: 'inherit' }}
+              >
+                {mediaUpload ? `Uploading ${mediaUpload.done + 1} of ${mediaUpload.total}…` : '+ Add Photos'}
+              </button>
+            </>
           )}
         </div>
         {person.media.length === 0 ? (
           <div style={{ border: '2px dashed #E2DBD2', borderRadius: 14, padding: 26, textAlign: 'center', background: '#FAF8F5' }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: '#8A817A' }}>No media uploaded yet</div>
+            {admin && (
+              <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 4 }}>
+                Photos are resized before upload, so you can add plenty.
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 11 }}>
             {person.media.map(m => (
-              <button key={m.id} type="button" onClick={() => openViewer({ title: m.title, sub: `${m.type} · ${m.size}`, kind: m.type })} style={{
-                position: 'relative', height: 126, borderRadius: 12, overflow: 'hidden',
-                border: '1px solid #E7E2DC', cursor: 'pointer', padding: 0,
-                backgroundColor: '#F7F3ED',
-                backgroundImage: 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
-              }}>
-                <span style={{ position: 'absolute', top: 8, left: 8, padding: '3px 8px', borderRadius: 99, background: 'rgba(255,255,255,.92)', fontSize: 9.5, fontWeight: 800, color: '#57534E' }}>
-                  {m.type}
-                </span>
-                {m.type === 'Video Clip' && (
-                  <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 36, height: 36, borderRadius: '50%', background: '#C2410C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><path d="M8 5l12 7-12 7z" /></svg>
-                  </span>
-                )}
-                <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 9px 8px', background: 'linear-gradient(transparent,rgba(28,25,23,.78))', textAlign: 'left' }}>
-                  <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
-                  <span style={{ display: 'block', fontSize: 10, color: 'rgba(255,255,255,.82)' }}>{m.size}</span>
-                </span>
-              </button>
+              <MediaTile key={m.id} m={m} personId={person.id} admin={admin} onView={openViewer} />
             ))}
           </div>
         )}
@@ -587,6 +616,7 @@ function ArchiveCard({
   onView: (r: ViewerRecord) => void;
 }) {
   const deleteArchive = useTreeStore(s => s.deleteArchive);
+  const openArchiveForm = useTreeStore(s => s.openArchiveForm);
   const [confirming, setConfirming] = useState(false);
   const thumb = useSignedUrl(a.filePath);
   const isPdf = /\.pdf$/i.test(a.fileName ?? '');
@@ -614,6 +644,23 @@ function ArchiveCard({
           }}>
             {a.year}
           </span>
+        )}
+        {admin && !confirming && (
+          <button
+            type="button"
+            aria-label={`Edit ${a.title}`}
+            onClick={() => openArchiveForm(personId, a.id)}
+            style={{
+              position: 'absolute', top: 8, right: 40,
+              width: 26, height: 26, borderRadius: 8, padding: 0,
+              border: '1px solid #E7E2DC', background: 'rgba(255,255,255,.92)', color: '#44403C',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" />
+            </svg>
+          </button>
         )}
         {admin && (
           <button
@@ -663,6 +710,68 @@ function ArchiveCard({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function MediaTile({
+  m, personId, admin, onView,
+}: {
+  m: MediaItem;
+  personId: string;
+  admin: boolean;
+  onView: (r: ViewerRecord) => void;
+}) {
+  const deleteMedia = useTreeStore(s => s.deleteMedia);
+  const [confirming, setConfirming] = useState(false);
+  const thumb = useSignedUrl(m.type === 'Photo' ? m.url : undefined);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" onClick={() => onView({ title: m.title, sub: `${m.type} · ${m.size}`, kind: m.type, url: m.url, fileName: `${m.title}.jpg` })} style={{
+        position: 'relative', display: 'block', width: '100%', height: 126, borderRadius: 12, overflow: 'hidden',
+        border: '1px solid #E7E2DC', cursor: 'pointer', padding: 0,
+        backgroundColor: '#F7F3ED',
+        backgroundImage: thumb ? `url(${thumb})` : 'repeating-linear-gradient(135deg,#EFE9E2 0 7px,#F8F5F0 7px 14px)',
+        backgroundSize: thumb ? 'cover' : undefined, backgroundPosition: 'center',
+      }}>
+        <span style={{ position: 'absolute', top: 8, left: 8, padding: '3px 8px', borderRadius: 99, background: 'rgba(255,255,255,.92)', fontSize: 9.5, fontWeight: 800, color: '#57534E' }}>
+          {m.type}
+        </span>
+        {m.type === 'Video Clip' && (
+          <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 36, height: 36, borderRadius: '50%', background: '#C2410C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><path d="M8 5l12 7-12 7z" /></svg>
+          </span>
+        )}
+        <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '16px 9px 8px', background: 'linear-gradient(transparent,rgba(28,25,23,.78))', textAlign: 'left' }}>
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+          <span style={{ display: 'block', fontSize: 10, color: 'rgba(255,255,255,.82)' }}>{m.size}</span>
+        </span>
+      </button>
+      {admin && (
+        <button
+          type="button"
+          aria-label={`Delete ${m.title}`}
+          onClick={() => { if (confirming) void deleteMedia(personId, m.id); else setConfirming(true); }}
+          onBlur={() => setConfirming(false)}
+          style={{
+            position: 'absolute', top: 7, right: 7,
+            padding: confirming ? '4px 8px' : 0,
+            width: confirming ? 'auto' : 24, height: 24, borderRadius: 7,
+            border: '1px solid #E7E2DC',
+            background: confirming ? '#B91C1C' : 'rgba(255,255,255,.92)',
+            color: confirming ? '#fff' : '#B91C1C',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10.5, fontWeight: 800, fontFamily: 'inherit', whiteSpace: 'nowrap',
+          }}
+        >
+          {confirming ? 'Delete?' : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" />
+            </svg>
+          )}
+        </button>
+      )}
     </div>
   );
 }

@@ -2,13 +2,16 @@ import { create } from 'zustand';
 import type {
   Person, Union, Tree, Invite, Session, Role,
   PanelTab, ViewMode, PanelMode, CanvasMode,
-  FormState, FormValues, ArchiveFormState, Archive, DirSortKey, Gender,
+  FormState, FormValues, ArchiveFormState, Archive, MediaItem, DirSortKey, Gender,
   RelativeKind, AddDialogState, ViewerRecord,
 } from '../types';
 import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from '../data/seed';
 import { spousesOf, parentsOf, unionsOf, childrenOf, getRoot, fullName } from '../utils/kinship';
 import { computeLayout } from '../utils/layout';
 import { repo } from '../data/repository';
+import { readScaledPhoto } from '../utils/image';
+import { exportPeopleCsv, templateCsv, planImport, type ImportPlan } from '../utils/csv';
+import { triggerDownload } from '../utils/export';
 
 const initialCollapsed: Record<string, boolean> = {};
 SEED_UNIONS.forEach(u => { if (u.id !== 'u1') initialCollapsed[u.id] = true; });
@@ -85,6 +88,8 @@ interface AppState {
   archiveForm: ArchiveFormState | null;
   /** True while an archive record (and any file) is being written. */
   savingArchive: boolean;
+  /** Gallery upload progress: photos done out of total, or null when idle. */
+  mediaUpload: { done: number; total: number } | null;
   addDialog: AddDialogState | null;
   /** Person queued for deletion, shown in the confirm dialog. */
   confirmDeleteId: string | null;
@@ -97,6 +102,9 @@ interface AppState {
   copied: boolean;
   newTreeOpen: boolean;
   viewerRecord: ViewerRecord | null;
+  /** A parsed, validated CSV awaiting confirmation. Nothing is written yet. */
+  csvPlan: (ImportPlan & { fileName: string }) | null;
+  csvImporting: boolean;
 
   // Directory
   dirSort: DirSortKey;
@@ -216,11 +224,20 @@ type Store = AppState & {
   setPhoto: (id: string, dataUrl: string | null) => void;
 
   // Archives
-  openArchiveForm: (id: string) => void;
+  /** Pass `archiveId` to edit an existing record instead of adding one. */
+  openArchiveForm: (id: string, archiveId?: string) => void;
   closeArchiveForm: () => void;
   setArchiveField: <K extends keyof Omit<ArchiveFormState, 'targetId'>>(key: K, val: ArchiveFormState[K]) => void;
   saveArchive: () => Promise<void>;
   deleteArchive: (personId: string, archiveId: string) => Promise<void>;
+  unlinkSpouse: (personId: string, spouseId: string) => Promise<void>;
+  exportCsv: () => void;
+  downloadCsvTemplate: () => void;
+  openCsvImport: (file: File) => Promise<void>;
+  closeCsvImport: () => void;
+  runCsvImport: () => Promise<void>;
+  addMediaPhotos: (personId: string, files: File[]) => Promise<void>;
+  deleteMedia: (personId: string, mediaId: string) => Promise<void>;
 
   // Viewer
   openViewer: (record: ViewerRecord) => void;
@@ -297,6 +314,7 @@ export const useTreeStore = create<Store>((set, get) => ({
   savingForm: false,
   archiveForm: null,
   savingArchive: false,
+  mediaUpload: null,
   addDialog: null,
   confirmDeleteId: null,
   inviteOpen: false,
@@ -307,6 +325,8 @@ export const useTreeStore = create<Store>((set, get) => ({
   copied: false,
   newTreeOpen: false,
   viewerRecord: null,
+  csvPlan: null,
+  csvImporting: false,
 
   dirSort: 'dob',
   dirSortAsc: true,
@@ -811,13 +831,26 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   // ---------------------------------------------------------------- archives
 
-  openArchiveForm: id => set({
-    plusMenu: null, form: null,
-    archiveForm: {
-      targetId: id, title: '', category: 'Historical Photograph / Portrait',
-      year: '', origin: '', notes: '', file: '', fileData: null,
-    },
-  }),
+  openArchiveForm: (id, archiveId) => {
+    const existing = archiveId
+      ? get().persons.find(p => p.id === id)?.archives.find(a => a.id === archiveId)
+      : undefined;
+    set({
+      plusMenu: null, form: null, viewerRecord: null,
+      archiveForm: existing
+        ? {
+            targetId: id, editId: existing.id,
+            title: existing.title, category: existing.category,
+            year: existing.year, origin: existing.origin, notes: existing.desc,
+            // Name only: the current file stays unless the user replaces it.
+            file: existing.fileName ?? '', fileData: null,
+          }
+        : {
+            targetId: id, title: '', category: 'Historical Photograph / Portrait',
+            year: '', origin: '', notes: '', file: '', fileData: null,
+          },
+    });
+  },
   closeArchiveForm: () => set({ archiveForm: null }),
   setArchiveField: (key, val) => set(s => s.archiveForm ? { archiveForm: { ...s.archiveForm, [key]: val } } : {}),
   saveArchive: async () => {
@@ -835,6 +868,24 @@ export const useTreeStore = create<Store>((set, get) => ({
 
     set({ savingArchive: true });
     try {
+      if (archiveForm.editId) {
+        const existing = get().persons.find(p => p.id === targetId)
+          ?.archives.find(a => a.id === archiveForm.editId);
+        if (!existing) throw new Error('That record no longer exists.');
+        // Keep the id and current attachment; the form only carries the name.
+        const edited: Archive = { ...draft, id: existing.id, filePath: existing.filePath, fileName: existing.fileName };
+        // Name cleared with no replacement picked = the user removed the file.
+        const dropFile = !archiveForm.fileData && !archiveForm.file && !!existing.filePath;
+        const saved = await repo.updateArchive(activeTreeId, targetId, edited, archiveForm.fileData, dropFile);
+        set(s => ({
+          persons: s.persons.map(p => p.id === targetId
+            ? { ...p, archives: p.archives.map(a => a.id === saved.id ? saved : a) } : p),
+          archiveForm: null, panel: targetId, panelTab: 'archives',
+          savingArchive: false, notice: 'Archive record updated',
+        }));
+        return;
+      }
+
       // Awaited so the record carries the real row id and storage path. The old
       // fire-and-forget version kept a client id that matched nothing in the DB.
       const saved = await repo.addArchive(activeTreeId, targetId, draft, archiveForm.fileData);
@@ -868,6 +919,173 @@ export const useTreeStore = create<Store>((set, get) => ({
       }));
     } catch (e) {
       set({ notice: e instanceof Error ? e.message : 'Could not delete that record.' });
+    }
+  },
+
+  /**
+   * Removes a marriage link recorded in error. Refuses when the couple has
+   * children: dropping a partner would quietly rewrite the children's
+   * parentage, which is a far bigger change than the button suggests.
+   */
+  unlinkSpouse: async (personId, spouseId) => {
+    const { unions, persons, rootId } = get();
+    const u = unions.find(x =>
+      (x.a === personId && x.b === spouseId) || (x.a === spouseId && x.b === personId));
+    if (!u) return;
+
+    const nameOf = (id: string) => {
+      const p = persons.find(x => x.id === id);
+      return p ? fullName(p) : 'This person';
+    };
+
+    if (u.children.length) {
+      set({
+        notice: `${nameOf(personId)} and ${nameOf(spouseId)} have ${u.children.length} ${u.children.length === 1 ? 'child' : 'children'} together. Remove or re-parent them first.`,
+      });
+      return;
+    }
+
+    try {
+      await repo.deleteUnion(u.id);
+      const newUnions = unions.filter(x => x.id !== u.id);
+
+      // The tree is drawn by walking unions from the root, so anyone left with
+      // no union at all stops being drawn — they still exist, just invisibly.
+      // Say so, rather than letting a card silently disappear.
+      const stranded = [personId, spouseId].filter(id =>
+        id !== rootId && !newUnions.some(x => x.a === id || x.b === id || x.children.includes(id)));
+
+      set({
+        unions: newUnions,
+        notice: stranded.length
+          ? `Link removed. ${stranded.map(nameOf).join(' and ')} ${stranded.length === 1 ? 'is' : 'are'} no longer connected to the tree — find them in Directory view to re-link or delete.`
+          : 'Marriage link removed',
+      });
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not remove that link.' });
+    }
+  },
+
+  addMediaPhotos: async (personId, files) => {
+    if (!files.length || get().mediaUpload) return;
+    const { activeTreeId } = get();
+    set({ mediaUpload: { done: 0, total: files.length } });
+
+    const failed: string[] = [];
+    // One at a time: keeps memory flat on phones and gives honest progress.
+    // Each photo lands in the gallery as soon as it's stored.
+    for (const file of files) {
+      try {
+        const blob = await readScaledPhoto(file);
+        const draft: MediaItem = {
+          id: 'm' + nid(),
+          title: file.name.replace(/\.[^.]+$/, ''),
+          type: 'Photo',
+          size: `${(blob.size / 1048576).toFixed(1)} MB`,
+        };
+        const saved = await repo.addMedia(activeTreeId, personId, draft, blob);
+        set(s => ({
+          persons: s.persons.map(p => p.id === personId ? { ...p, media: [...p.media, saved] } : p),
+        }));
+      } catch {
+        failed.push(file.name);
+      }
+      set(s => ({ mediaUpload: s.mediaUpload && { ...s.mediaUpload, done: s.mediaUpload.done + 1 } }));
+    }
+
+    const ok = files.length - failed.length;
+    set({
+      mediaUpload: null,
+      notice: failed.length
+        ? `${ok} of ${files.length} photos added. Couldn't upload: ${failed.join(', ')}`
+        : `${ok} ${ok === 1 ? 'photo' : 'photos'} added to the gallery`,
+    });
+  },
+
+  deleteMedia: async (personId, mediaId) => {
+    const item = get().persons.find(p => p.id === personId)?.media.find(m => m.id === mediaId);
+    if (!item) return;
+    try {
+      await repo.deleteMedia(item);
+      set(s => ({
+        persons: s.persons.map(p => p.id === personId
+          ? { ...p, media: p.media.filter(m => m.id !== mediaId) }
+          : p),
+        viewerRecord: null,
+        notice: 'Photo removed from the gallery',
+      }));
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not remove that photo.' });
+    }
+  },
+
+  // ---------------------------------------------------------------- csv
+
+  exportCsv: () => {
+    const { persons, unions, trees, activeTreeId } = get();
+    const name = trees.find(t => t.id === activeTreeId)?.name ?? 'Family';
+    const csv = exportPeopleCsv({ persons, unions });
+    triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${name}-Family-Tree.csv`);
+    set({ notice: `Exported ${persons.length} ${persons.length === 1 ? 'person' : 'people'} to CSV` });
+  },
+
+  downloadCsvTemplate: () => {
+    triggerDownload(new Blob([templateCsv()], { type: 'text/csv;charset=utf-8' }), 'Family-Tree-Template.csv');
+  },
+
+  openCsvImport: async file => {
+    try {
+      const plan = planImport(await file.text());
+      set({ csvPlan: { ...plan, fileName: file.name } });
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not read that file.' });
+    }
+  },
+
+  closeCsvImport: () => { if (!get().csvImporting) set({ csvPlan: null }); },
+
+  runCsvImport: async () => {
+    const { csvPlan, activeTreeId, persons, csvImporting } = get();
+    if (!csvPlan || csvImporting || csvPlan.errors.length) return;
+    if (persons.length) {
+      set({ notice: 'Import only works on an empty tree. Create a new tree first.' });
+      return;
+    }
+
+    set({ csvImporting: true });
+    try {
+      await repo.importPeople(activeTreeId, csvPlan);
+
+      if (repo.kind === 'supabase') {
+        // Re-read rather than reconstruct: the server assigned every id.
+        await get().loadActiveTree(activeTreeId);
+      } else {
+        const ids = new Map(csvPlan.people.map(p => [p.ref, nid()]));
+        const newPersons: Person[] = csvPlan.people.map(({ ref, ...p }) => ({
+          ...p, id: ids.get(ref)!, archives: [], media: [], sample: false,
+          originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',
+        }));
+        const newUnions: Union[] = csvPlan.unions.map(u => ({
+          id: 'u' + nid(),
+          a: u.a ? ids.get(u.a)! : null,
+          b: u.b ? ids.get(u.b)! : null,
+          date: u.date, place: u.place,
+          children: u.children.map(c => ids.get(c)!),
+        }));
+        const rootId = ids.get(csvPlan.rootRef) ?? '';
+        const collapsed: Record<string, boolean> = {};
+        newUnions.forEach(u => { if (u.a !== rootId && u.b !== rootId) collapsed[u.id] = true; });
+        set({ persons: newPersons, unions: newUnions, rootId, collapsed });
+      }
+
+      const n = csvPlan.people.length;
+      set({ csvPlan: null, csvImporting: false, notice: `Imported ${n} ${n === 1 ? 'person' : 'people'}` });
+    } catch (e) {
+      // The server side is one transaction, so a failure here changed nothing.
+      set({
+        csvImporting: false,
+        notice: e instanceof Error ? `Import failed, nothing was saved: ${e.message}` : 'Import failed, nothing was saved.',
+      });
     }
   },
 

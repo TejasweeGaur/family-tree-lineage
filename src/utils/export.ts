@@ -88,7 +88,7 @@ export async function exportExcel(data: TreeData, treeName: string): Promise<voi
   triggerDownload(blob, `${treeName}-Family-Tree.xlsx`);
 }
 
-function triggerDownload(blob: Blob, filename: string) {
+export function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

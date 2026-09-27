@@ -1,6 +1,7 @@
 import type { Person, Union, Archive, MediaItem, Invite, Role, Session, User } from '../types';
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
 import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from './seed';
+import type { ImportPlan } from '../utils/csv';
 
 export interface TreeSnapshot {
   treeId: string;
@@ -40,11 +41,18 @@ export interface Repository {
   updateUnion(u: Union): Promise<void>;
   addChild(unionId: string, childId: string): Promise<void>;
   removeUnionPartner(unionId: string, personId: string): Promise<void>;
+  deleteUnion(unionId: string): Promise<void>;
 
   // attachments
   addArchive(treeId: string, personId: string, a: Archive, file: File | null): Promise<Archive>;
   deleteArchive(a: Archive): Promise<void>;
-  addMedia(personId: string, m: MediaItem): Promise<void>;
+  /**
+   * Updates a record's details. `file` replaces the attachment; `dropFile`
+   * removes it. The previous object is deleted only after the row points away.
+   */
+  updateArchive(treeId: string, personId: string, a: Archive, file: File | null, dropFile: boolean): Promise<Archive>;
+  addMedia(treeId: string, personId: string, m: MediaItem, file: Blob): Promise<MediaItem>;
+  deleteMedia(m: MediaItem): Promise<void>;
   setPhoto(treeId: string, personId: string, dataUrl: string | null): Promise<string | null>;
   /**
    * Turns a stored object path into something an <img> or <a> can use.
@@ -58,6 +66,10 @@ export interface Repository {
   revokeInvite(token: string): Promise<void>;
   /** Joins the caller to the invite's tree. Resolves to the tree id. */
   redeemInvite(token: string): Promise<string>;
+
+  // bulk
+  /** Writes a validated CSV plan in one transaction. Resolves when committed. */
+  importPeople(treeId: string, plan: ImportPlan): Promise<void>;
 }
 
 // ---------------------------------------------------------------- local
@@ -162,12 +174,21 @@ class LocalRepository implements Repository {
   async updateUnion() {}
   async addChild() {}
   async removeUnionPartner() {}
+  async deleteUnion() {}
   async addArchive(_treeId: string, _personId: string, a: Archive, file: File | null) {
     // Demo mode keeps the file in memory only, as an object URL.
     return file ? { ...a, filePath: URL.createObjectURL(file), fileName: file.name } : a;
   }
   async deleteArchive() {}
-  async addMedia() {}
+  async updateArchive(_treeId: string, _personId: string, a: Archive, file: File | null, dropFile: boolean) {
+    if (file) return { ...a, filePath: URL.createObjectURL(file), fileName: file.name };
+    if (dropFile) return { ...a, filePath: undefined, fileName: undefined };
+    return a;
+  }
+  async addMedia(_treeId: string, _personId: string, m: MediaItem, file: Blob) {
+    return { ...m, url: URL.createObjectURL(file) };
+  }
+  async deleteMedia() {}
   async setPhoto(_treeId: string, _personId: string, dataUrl: string | null) { return dataUrl; }
   async signedUrl(stored: string) { return stored || null; }
 
@@ -191,6 +212,9 @@ class LocalRepository implements Repository {
     if (inv.revokedAt) throw new Error('This invite link has been revoked');
     return inv.treeId;
   }
+
+  // Demo mode has no per-tree storage; the store builds the imported state.
+  async importPeople() {}
 }
 
 // ---------------------------------------------------------------- supabase
@@ -304,7 +328,7 @@ class SupabaseRepository implements Repository {
 
     const [{ data: pRows, error: pe }, { data: uRows, error: ue }, { data: ucRows }, { data: aRows }, { data: mRows }] =
       await Promise.all([
-        sb.from('persons').select('*').eq('tree_id', tree.id),
+        sb.from('persons').select('*').eq('tree_id', tree.id).order('created_at'),
         sb.from('unions').select('*').eq('tree_id', tree.id),
         sb.from('union_children').select('union_id, child_id'),
         sb.from('archive_records').select('*'),
@@ -428,6 +452,11 @@ class SupabaseRepository implements Repository {
     if (error) throw error;
   }
 
+  async deleteUnion(unionId: string): Promise<void> {
+    const { error } = await requireSupabase().from('unions').delete().eq('id', unionId);
+    if (error) throw error;
+  }
+
   async removeUnionPartner(unionId: string, personId: string): Promise<void> {
     const sb = requireSupabase();
     const { data } = await sb.from('unions').select('partner_a, partner_b').eq('id', unionId).single();
@@ -457,7 +486,11 @@ class SupabaseRepository implements Repository {
       category: a.category, descr: a.desc, origin: a.origin,
       file_url: filePath ?? null,
     }).select('id').single();
-    if (error) throw error;
+    if (error) {
+      // Don't leave an unreferenced file eating quota.
+      if (filePath) await sb.storage.from('archives').remove([filePath.slice('archives/'.length)]);
+      throw error;
+    }
 
     return {
       ...a,
@@ -465,6 +498,39 @@ class SupabaseRepository implements Repository {
       filePath,
       fileName: file?.name,
     };
+  }
+
+  async updateArchive(treeId: string, personId: string, a: Archive, file: File | null, dropFile: boolean): Promise<Archive> {
+    const sb = requireSupabase();
+    const previous = a.filePath;
+    let filePath = dropFile ? undefined : previous;
+    let fileName = dropFile ? undefined : a.fileName;
+    let uploaded: string | undefined;
+
+    if (file) {
+      uploaded = `${treeId}/${personId}/${objectName(file.name)}`;
+      const { error: ue } = await sb.storage.from('archives').upload(uploaded, file, {
+        contentType: file.type || 'application/octet-stream',
+      });
+      if (ue) throw ue;
+      filePath = `archives/${uploaded}`;
+      fileName = file.name;
+    }
+
+    const { error } = await sb.from('archive_records').update({
+      title: a.title, year: a.year, category: a.category,
+      descr: a.desc, origin: a.origin, file_url: filePath ?? null,
+    }).eq('id', a.id);
+    if (error) {
+      if (uploaded) await sb.storage.from('archives').remove([uploaded]);
+      throw error;
+    }
+
+    // Only now that nothing references it is the old file safe to remove.
+    if (previous && previous !== filePath && previous.startsWith('archives/')) {
+      await sb.storage.from('archives').remove([previous.slice('archives/'.length)]);
+    }
+    return { ...a, filePath, fileName };
   }
 
   async deleteArchive(a: Archive): Promise<void> {
@@ -482,11 +548,36 @@ class SupabaseRepository implements Repository {
     }
   }
 
-  async addMedia(personId: string, m: MediaItem): Promise<void> {
-    const { error } = await requireSupabase().from('media_items').insert({
-      person_id: personId, title: m.title, kind: m.type, url: m.url ?? null,
-    });
+  async addMedia(treeId: string, personId: string, m: MediaItem, file: Blob): Promise<MediaItem> {
+    const sb = requireSupabase();
+    // Same bucket as avatars, under a media/ subfolder. Tree id first, as the
+    // storage policies require.
+    const path = `${treeId}/${personId}/media/${crypto.randomUUID()}.jpg`;
+    const { error: ue } = await sb.storage.from('photos').upload(path, file, { contentType: 'image/jpeg' });
+    if (ue) throw ue;
+
+    const stored = `photos/${path}`;
+    const { data, error } = await sb.from('media_items').insert({
+      person_id: personId, title: m.title, kind: m.type,
+      size_bytes: file.size, url: stored,
+    }).select('id').single();
+    if (error) {
+      // Don't leave an unreferenced file eating quota.
+      await sb.storage.from('photos').remove([path]);
+      throw error;
+    }
+    return { ...m, id: data.id as string, url: stored };
+  }
+
+  async deleteMedia(m: MediaItem): Promise<void> {
+    const sb = requireSupabase();
+    // Row first, as with archives: a failed file removal only orphans storage.
+    const { error } = await sb.from('media_items').delete().eq('id', m.id);
     if (error) throw error;
+    if (m.url && !/^(https?:|data:|blob:)/.test(m.url)) {
+      const slash = m.url.indexOf('/');
+      if (slash > 0) await sb.storage.from(m.url.slice(0, slash)).remove([m.url.slice(slash + 1)]);
+    }
   }
 
   async setPhoto(treeId: string, personId: string, dataUrl: string | null): Promise<string | null> {
@@ -567,6 +658,16 @@ class SupabaseRepository implements Repository {
     const { data, error } = await sb.rpc('redeem_invite', { invite_token: token });
     if (error) throw error;
     return data as string;
+  }
+
+  async importPeople(treeId: string, plan: ImportPlan): Promise<void> {
+    const { error } = await requireSupabase().rpc('import_people', {
+      p_tree: treeId,
+      p_people: plan.people,
+      p_unions: plan.unions,
+      p_root: plan.rootRef,
+    });
+    if (error) throw error;
   }
 }
 
