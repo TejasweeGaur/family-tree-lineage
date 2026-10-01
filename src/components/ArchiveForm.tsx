@@ -1,35 +1,68 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { ARCHIVE_CATEGORIES } from '../data/seed';
+import { compressDocumentImage } from '../utils/image';
+import { ARCHIVE_MAX_BYTES, IMAGE_INPUT_MAX_BYTES, formatBytes } from '../config/limits';
 
 const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
-const MAX_BYTES = 15 * 1024 * 1024;
 
 export function ArchiveForm() {
   const store = useTreeStore();
   const { archiveForm, savingArchive } = store;
   const fileRef = useRef<HTMLInputElement>(null);
+  const [compressing, setCompressing] = useState(false);
+  // Size before compression, to show what was saved. Null when unchanged.
+  const [originalSize, setOriginalSize] = useState<number | null>(null);
   if (!archiveForm) return null;
 
   const person = store.persons.find(p => p.id === archiveForm.targetId);
-  const canSave = !!archiveForm.title && !savingArchive;
+  const canSave = !!archiveForm.title && !savingArchive && !compressing;
   const isEdit = !!archiveForm.editId;
   // Editing a record whose file is kept as-is: we have its name, not its bytes.
   const keepingExisting = isEdit && !archiveForm.fileData && !!archiveForm.file;
 
-  const pick = (f: File | null) => {
+  const pick = async (f: File | null) => {
     if (!f) return;
-    // The bucket also caps this at 15 MB, but failing here gives a real message
-    // instead of an opaque storage error after the upload has already started.
-    if (f.size > MAX_BYTES) {
-      store.setNotice('That file is larger than 15MB.');
+    const isImage = f.type.startsWith('image/');
+    const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+    if (!isImage && !isPdf) {
+      store.setNotice('Choose a JPG, PNG, WEBP or PDF file.');
       return;
     }
-    store.setArchiveField('fileData', f);
-    store.setArchiveField('file', f.name);
+    // PDFs can't be meaningfully compressed in the browser, so they must
+    // already fit. Most phone scanner apps have a "reduce size" option.
+    if (isPdf && f.size > ARCHIVE_MAX_BYTES) {
+      store.setNotice(`That PDF is ${formatBytes(f.size)}; the limit is ${formatBytes(ARCHIVE_MAX_BYTES)}. Try your scanner app's "reduce size" option.`);
+      return;
+    }
+    if (isImage && f.size > IMAGE_INPUT_MAX_BYTES) {
+      store.setNotice(`That image is ${formatBytes(f.size)}; the most that can be compressed is ${formatBytes(IMAGE_INPUT_MAX_BYTES)}.`);
+      return;
+    }
+
+    let out = f;
+    if (isImage) {
+      setCompressing(true);
+      try {
+        out = await compressDocumentImage(f);
+      } catch (e) {
+        store.setNotice(e instanceof Error ? e.message : 'Could not process that image.');
+        return;
+      } finally {
+        setCompressing(false);
+      }
+    }
+    if (out.size > ARCHIVE_MAX_BYTES) {
+      store.setNotice(`Even compressed, that file is ${formatBytes(out.size)}; the limit is ${formatBytes(ARCHIVE_MAX_BYTES)}.`);
+      return;
+    }
+    setOriginalSize(out === f ? null : f.size);
+    store.setArchiveField('fileData', out);
+    store.setArchiveField('file', out.name);
   };
 
   const clearFile = () => {
+    setOriginalSize(null);
     store.setArchiveField('fileData', null);
     store.setArchiveField('file', '');
     if (fileRef.current) fileRef.current.value = '';
@@ -78,14 +111,14 @@ export function ArchiveForm() {
           {/* Drop zone */}
           <div
             onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); pick(e.dataTransfer.files?.[0] ?? null); }}
+            onDrop={e => { e.preventDefault(); void pick(e.dataTransfer.files?.[0] ?? null); }}
             style={{ border: '2px dashed #E2DBD2', borderRadius: 16, padding: 24, textAlign: 'center', background: '#FAF8F5' }}
           >
             <input
               ref={fileRef}
               type="file"
               accept={ACCEPT}
-              onChange={e => pick(e.target.files?.[0] ?? null)}
+              onChange={e => { void pick(e.target.files?.[0] ?? null); e.target.value = ''; }}
               style={{ display: 'none' }}
             />
 
@@ -109,7 +142,9 @@ export function ArchiveForm() {
                   {archiveForm.file}
                 </div>
                 <div style={{ fontSize: 11, color: '#A8A29E', marginTop: 2 }}>
-                  {(archiveForm.fileData.size / 1048576).toFixed(2)} MB
+                  {originalSize
+                    ? <>Compressed {formatBytes(originalSize)} → <strong style={{ color: '#15803D' }}>{formatBytes(archiveForm.fileData.size)}</strong></>
+                    : formatBytes(archiveForm.fileData.size)}
                 </div>
                 <button type="button" onClick={clearFile} style={{
                   marginTop: 8, padding: '5px 11px', borderRadius: 8,
@@ -137,7 +172,11 @@ export function ArchiveForm() {
             ) : (
               <>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>Drag and drop a scan or photo here</div>
-                <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3 }}>Supports JPG, PNG, WEBP, PDF up to 15MB</div>
+                <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3, lineHeight: 1.5 }}>
+                  {compressing
+                    ? 'Compressing…'
+                    : <>JPG, PNG or WEBP — compressed automatically.<br />PDF up to {formatBytes(ARCHIVE_MAX_BYTES)}.</>}
+                </div>
                 <button type="button" onClick={() => fileRef.current?.click()} style={{
                   marginTop: 13, padding: '9px 16px', borderRadius: 10, border: 'none',
                   background: '#1C1917', color: '#fff', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,

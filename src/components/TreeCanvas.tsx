@@ -99,6 +99,7 @@ export function TreeCanvas() {
     <div
       ref={scrollerRef}
       className="canvas-bg"
+      data-tour="canvas"
       style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', cursor: mode === 'drag' ? 'grab' : 'default' }}
       onMouseDown={onPanStart}
       onClick={() => { setFocus(null); setBranch(null); closeAllMenus(); }}

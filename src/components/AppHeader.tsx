@@ -1,4 +1,5 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
+import { eventsWithin } from '../utils/onThisDay';
 import { useTreeStore } from '../store/useTreeStore';
 import { fullName, initials } from '../utils/kinship';
 import { palette } from '../utils/palette';
@@ -25,6 +26,16 @@ export function AppHeader() {
   } = store;
 
   const isAdmin = store.isAdmin();
+  const setOnThisDayOpen = useTreeStore(s => s.setOnThisDayOpen);
+  const isOwner = useTreeStore(s => s.isOwner());
+  const setDeleteTreeOpen = useTreeStore(s => s.setDeleteTreeOpen);
+  const startTour = useTreeStore(s => s.startTour);
+  const setAboutOpen = useTreeStore(s => s.setAboutOpen);
+  // Recomputed only when the tree changes; drives the badge on the button.
+  const todayCount = useMemo(
+    () => eventsWithin({ persons, unions }, new Date(), 0).length,
+    [persons, unions],
+  );
   const compact = winW < 1180;
   const isMobile = winW < 640;
 
@@ -164,6 +175,7 @@ export function AppHeader() {
           <button
             type="button"
             onClick={() => setTreeMenu(!treeMenu)}
+            data-tour="tree-switcher"
             style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: '2px 0 0', cursor: 'pointer', color: '#78716C', fontSize: 11.5, fontWeight: 500, fontFamily: 'inherit' }}
           >
             {[activeTree?.originPlace, activeTree?.originCountry].filter(Boolean).join(', ') || 'Genealogy & Roots Archive'}
@@ -181,17 +193,30 @@ export function AppHeader() {
                 fontSize: 13, fontWeight: 600, width: '100%', textAlign: 'left', fontFamily: 'inherit',
                 color: t.id === activeTreeId ? '#C2410C' : '#292524',
               }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: t.id === activeTreeId ? '#C2410C' : '#A8A29E' }} />
-                {t.name} Family Tree
+                <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: t.id === activeTreeId ? '#C2410C' : '#A8A29E' }} />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name} Family Tree</span>
+                {t.role && (
+                  <span style={{
+                    flexShrink: 0, padding: '2px 7px', borderRadius: 99, fontSize: 9.5, fontWeight: 800, letterSpacing: '.05em',
+                    background: t.role === 'admin' ? '#FEF3C7' : '#F0EDE9', color: t.role === 'admin' ? '#92400E' : '#57534E',
+                  }}>{t.role === 'admin' ? 'ADMIN' : 'VIEWER'}</span>
+                )}
               </button>
             ))}
-            {isAdmin && (
+            {/* Anyone can start their own archive, including viewers of this one. */}
+            {(
               <>
                 <div style={{ height: 1, background: '#F0EBE5', margin: '6px 4px' }} />
                 <button type="button" onClick={() => { setTreeMenu(false); setNewTreeOpen(true); }} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#C2410C', textAlign: 'left', fontFamily: 'inherit' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
                   Create new family tree
                 </button>
+                {isOwner && (
+                  <button type="button" onClick={() => setDeleteTreeOpen(true)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#B91C1C', textAlign: 'left', fontFamily: 'inherit' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" /></svg>
+                    Delete this tree…
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -200,7 +225,7 @@ export function AppHeader() {
 
       {/* Search — full field on wide screens, icon toggle when compact */}
       {compact ? (
-        <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div style={{ position: 'relative', flexShrink: 0 }} data-tour="search">
           <button type="button" aria-label="Search" onClick={() => setSearchOpen(!searchOpen)} style={{ ...btn, width: 38, height: 38, padding: 0, justifyContent: 'center' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.4-3.4" /></svg>
           </button>
@@ -211,11 +236,11 @@ export function AppHeader() {
           )}
         </div>
       ) : (
-        <div style={{ flex: 1, maxWidth: 420, minWidth: 180 }}>{searchField}</div>
+        <div style={{ flex: 1, maxWidth: 420, minWidth: 180 }} data-tour="search">{searchField}</div>
       )}
 
       {/* View switch */}
-      <div style={{ display: 'flex', background: '#F5F1EC', border: '1px solid #E7E2DC', borderRadius: 11, padding: 3, gap: 3, flexShrink: 0 }}>
+      <div data-tour="view-toggle" style={{ display: 'flex', background: '#F5F1EC', border: '1px solid #E7E2DC', borderRadius: 11, padding: 3, gap: 3, flexShrink: 0 }}>
         {(['tree', 'directory'] as const).map(v => (
           <button key={v} type="button" onClick={() => setView(v)} aria-label={v === 'tree' ? 'Tree' : 'Directory'} aria-pressed={view === v} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: isMobile ? '7px 9px' : '7px 13px',
@@ -255,15 +280,41 @@ export function AppHeader() {
           {!compact && (isAdmin ? 'Admin' : 'Viewer')}
         </button>
 
+        {/* On this day — icon-only to keep the header from overflowing */}
+        <button
+          type="button"
+          onClick={() => setOnThisDayOpen(true)}
+          aria-label={todayCount ? `On this day: ${todayCount} today` : 'On this day'}
+          title="On this day"
+          data-tour="on-this-day"
+          style={{ ...btn, padding: 0, width: 38, height: 38, justifyContent: 'center', position: 'relative' }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8 3v4M16 3v4M4 10h16" />
+            <path d="M12 13.2l.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3z" fill="currentColor" stroke="none" />
+          </svg>
+          {todayCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -5, right: -5, minWidth: 17, height: 17, padding: '0 4px',
+              borderRadius: 99, background: '#C2410C', color: '#fff', fontSize: 10, fontWeight: 800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 2px #fff',
+            }}>{todayCount}</span>
+          )}
+        </button>
+
+        {/* Admin-only: the database only lets admins create invite links. */}
+        {isAdmin && (
         <button
           type="button"
           onClick={() => setInviteOpen(true)}
           aria-label="Invite relatives"
+          data-tour="invite"
           style={{ ...btn, ...(compact ? { padding: 0, width: 38, height: 38, justifyContent: 'center' } : {}) }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="9" cy="8" r="3.4" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M18.5 9v6M15.5 12h6" /></svg>
           {!compact && 'Invite Relatives'}
         </button>
+        )}
 
         {/* Export — available to viewers too */}
         <div style={{ position: 'relative' }}>
@@ -271,6 +322,7 @@ export function AppHeader() {
             type="button"
             onClick={() => setExportMenu(!exportMenu)}
             aria-label="Export"
+            data-tour="export"
             style={{ ...btn, ...(compact ? { padding: 0, width: 38, height: 38, justifyContent: 'center' } : {}) }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M12 4v11M8 11l4 4 4-4M4 19h16" /></svg>
@@ -310,6 +362,7 @@ export function AppHeader() {
               type="button"
               onClick={() => setDataMenu(!dataMenu)}
               aria-label="Data"
+              data-tour="data"
               style={{ ...btn, ...(compact ? { padding: 0, width: 38, height: 38, justifyContent: 'center' } : {}) }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M4 7h16" /><path d="M5 7v12h14V7" /><path d="M10 11h4" /></svg>
@@ -355,6 +408,7 @@ export function AppHeader() {
             type="button"
             onClick={() => openAddDialog()}
             aria-label="Add member"
+            data-tour="add-member"
             style={{ ...btn, background: '#1C1917', border: '1px solid #1C1917', color: '#fff', ...(compact ? { padding: 0, width: 38, height: 38, justifyContent: 'center' } : { padding: '9px 15px' }) }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -368,6 +422,7 @@ export function AppHeader() {
             type="button"
             onClick={() => setUserMenu(!userMenu)}
             aria-label="Account"
+            data-tour="account"
             style={{
               width: 38, height: 38, borderRadius: '50%', flexShrink: 0, padding: 0,
               border: 'none', cursor: 'pointer',
@@ -393,6 +448,20 @@ export function AppHeader() {
                   <span style={{ fontSize: 11, color: '#A8A29E' }}>Signed in with Google</span>
                 </div>
               </div>
+              <div style={{ height: 1, background: '#F0EBE5', margin: '6px 4px' }} />
+              {[
+                ['Take the quick tour', () => { setUserMenu(false); startTour(); }],
+                ['About this app', () => setAboutOpen(true)],
+              ].map(([label, go]) => (
+                <button
+                  key={label as string}
+                  type="button"
+                  onClick={go as () => void}
+                  style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#292524', textAlign: 'left', fontFamily: 'inherit' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#F7F5F2')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                >{label as string}</button>
+              ))}
               <div style={{ height: 1, background: '#F0EBE5', margin: '6px 4px' }} />
               <button
                 type="button"

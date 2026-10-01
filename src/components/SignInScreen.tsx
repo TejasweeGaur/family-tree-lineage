@@ -1,6 +1,7 @@
 import { useTreeStore } from '../store/useTreeStore';
 import { repo } from '../data/repository';
 import { TreePreview } from './TreePreview';
+import { AppFooter } from './AppFooter';
 
 /** Official four-colour Google mark, per their sign-in branding guidelines. */
 function GoogleMark() {
@@ -53,6 +54,7 @@ export function SignInScreen() {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 200, overflowY: 'auto',
+      display: 'flex', flexDirection: 'column',
       background: '#F7F5F2',
       backgroundImage: 'radial-gradient(#DED7CE 1.1px, transparent 1.1px)',
       backgroundSize: '22px 22px',
@@ -60,7 +62,7 @@ export function SignInScreen() {
       color: '#1C1917',
     }}>
       <div style={{
-        minHeight: '100%', boxSizing: 'border-box',
+        flex: '1 0 auto', width: '100%', boxSizing: 'border-box',
         display: 'grid', alignItems: 'center',
         gridTemplateColumns: stacked ? '1fr' : 'minmax(0,1.05fr) minmax(0,.95fr)',
         gap: stacked ? 34 : 56,
@@ -194,6 +196,7 @@ export function SignInScreen() {
         </div>
 
       </div>
+      <AppFooter showTree={false} />
     </div>
   );
 }

@@ -16,6 +16,11 @@ import { SignInScreen } from './components/SignInScreen';
 import { CreateTreeScreen } from './components/CreateTreeScreen';
 import { CsvImportDialog } from './components/CsvImportDialog';
 import { PhotoLightbox } from './components/PhotoLightbox';
+import { AboutModal } from './components/AboutModal';
+import { OnThisDayModal } from './components/OnThisDayModal';
+import { DeleteTreeDialog } from './components/DeleteTreeDialog';
+import { AppFooter } from './components/AppFooter';
+import { tourSeen } from './utils/tour';
 import { AddMemberDialog } from './components/AddMemberDialog';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 
@@ -29,6 +34,16 @@ function App() {
 
   useEffect(() => { void initAuth(); }, [initAuth]);
 
+  // First visit to a loaded tree: offer the tour once, per user.
+  const userId = session?.user.id;
+  const activeTreeId = useTreeStore(s => s.activeTreeId);
+  useEffect(() => {
+    if (!authReady || !userId || !session?.treeId || !activeTreeId) return;
+    if (tourSeen(userId)) return;
+    const t = setTimeout(() => useTreeStore.getState().startTour(), 900);
+    return () => clearTimeout(t);
+  }, [authReady, userId, session?.treeId, activeTreeId]);
+
   useEffect(() => {
     const onResize = () => setWinW(window.innerWidth);
     window.addEventListener('resize', onResize);
@@ -40,6 +55,9 @@ function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       const s = useTreeStore.getState();
+      if (s.deleteTreeOpen) return s.setDeleteTreeOpen(false);
+      if (s.aboutOpen) return s.setAboutOpen(false);
+      if (s.onThisDayOpen) return s.setOnThisDayOpen(false);
       if (s.photoView) return s.closePhotoView();
       if (s.viewerRecord) return s.closeViewer();
       if (s.confirmDeleteId) return s.cancelDelete();
@@ -56,12 +74,16 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  if (import.meta.env.DEV && window.location.hash === '#crash-test') {
+    throw new Error('Crash test: this is the error screen.');
+  }
+
   if (!authReady) {
     return <div style={{ height: '100vh', background: '#F7F5F2' }} />;
   }
-  if (!session) return <SignInScreen />;
+  if (!session) return <><SignInScreen /><AboutModal /></>;
   // Signed in, but no archive yet — first run.
-  if (!session.treeId) return <CreateTreeScreen />;
+  if (!session.treeId) return <><CreateTreeScreen /><AboutModal /></>;
 
   const isMobile = winW < 640;
   const gutter = isMobile ? 12 : 20;
@@ -102,6 +124,8 @@ function App() {
         {view === 'tree' ? <TreeCanvas /> : <DirectoryView />}
       </div>
 
+      <AppFooter />
+
       <ProfilePanel />
       <PersonForm />
       <ArchiveForm />
@@ -112,6 +136,9 @@ function App() {
       <NewTreeModal />
       <CsvImportDialog />
       <PhotoLightbox />
+      <AboutModal />
+      <OnThisDayModal />
+      <DeleteTreeDialog />
       <PlusMenu />
       <NoticeToast />
     </div>

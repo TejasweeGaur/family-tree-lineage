@@ -1,0 +1,7 @@
+# Cloudflare Pages response headers (applied to every path).
+/*
+  # No embedding in other sites' frames: blocks clickjacking against signed-in relatives.
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

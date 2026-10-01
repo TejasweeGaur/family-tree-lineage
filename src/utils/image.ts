@@ -36,6 +36,41 @@ export function readScaledPhoto(file: File, maxEdge = 1600): Promise<Blob> {
 }
 
 /**
+ * Compresses a scanned document or photo for the archive: longest edge capped
+ * at 2400px (about 200 dpi for an A4 page, so text stays legible) and
+ * re-encoded as JPEG. If that wouldn't make it smaller — an already-optimised
+ * JPEG, say — the original is kept untouched.
+ */
+export function compressDocumentImage(file: File, maxEdge = 2400, quality = 0.85): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name} could not be read as an image.`)); };
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas is unavailable.')); return; }
+      // JPEG has no transparency: without a white fill, transparent areas of a
+      // PNG scan would come out black.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error(`${file.name} could not be compressed.`)); return; }
+        if (blob.size >= file.size) { resolve(file); return; }
+        const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+        resolve(new File([blob], name, { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.src = url;
+  });
+}
+
+/**
  * Reads a picked image, centre-crops it square and downscales it to an 800px
  * JPEG data URL, roughly 60-120 KB. Large enough to look sharp in the
  * full-screen photo viewer, small enough to be cheap to store.

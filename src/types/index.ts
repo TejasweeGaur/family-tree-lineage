@@ -68,6 +68,21 @@ export interface Tree {
   /** Ancestral town or village. Free text — historic names rarely match modern ones. */
   originPlace: string;
   originCountry: string;
+  /** The signed-in user's role in this tree, when known (Supabase mode). */
+  role?: Role;
+  /** The tree's creator: the only person who can delete it. */
+  ownerId?: string;
+}
+
+/** Someone with access to a tree, as shown on the Members tab. */
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  avatarUrl?: string;
+  role: Role;
+  joinedAt: string;
+  isOwner: boolean;
 }
 
 /** Membership role. Authoritative value comes from the server; never from a query param. */

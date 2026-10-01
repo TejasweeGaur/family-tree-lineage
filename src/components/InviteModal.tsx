@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { MembersTab } from './MembersTab';
 import { useTreeStore } from '../store/useTreeStore';
 import type { Role } from '../types';
 
@@ -25,6 +26,7 @@ export function InviteModal() {
   const revokeInviteToken = useTreeStore(s => s.revokeInviteToken);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const [tab, setTab] = useState<'invite' | 'members'>('invite');
 
   if (!inviteOpen) return null;
 
@@ -52,18 +54,20 @@ export function InviteModal() {
     >
       <div
         role="dialog"
-        aria-label="Invite relatives"
+        aria-label="Family access"
         onClick={e => e.stopPropagation()}
         style={{
-          width: 'min(480px, 96vw)', background: '#FFFDFB', borderRadius: 20,
-          boxShadow: '0 26px 60px rgba(28,25,23,.26)', overflow: 'hidden',
+          width: 'min(520px, 96vw)', maxHeight: '92vh', overflowY: 'auto', background: '#FFFDFB', borderRadius: 20,
+          boxShadow: '0 26px 60px rgba(28,25,23,.26)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '18px 22px 0' }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.015em' }}>Invite relatives</div>
+            <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.015em' }}>Family access</div>
             <div style={{ fontSize: 12.5, color: '#6B635C', marginTop: 3, lineHeight: 1.45 }}>
-              Share a link with family. They sign in with Google to join the {treeName} Family Tree.
+              {tab === 'invite'
+                ? `Share a link with family. They sign in with Google to join the ${treeName} Family Tree.`
+                : `Everyone who can see the ${treeName} Family Tree.`}
             </div>
           </div>
           <button
@@ -76,6 +80,17 @@ export function InviteModal() {
           </button>
         </div>
 
+        <div role="tablist" style={{ display: 'flex', gap: 4, padding: '14px 22px 0', borderBottom: '1px solid #EFE9E2' }}>
+          {([['invite', 'Invite links'], ['members', 'Members']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} style={{
+              padding: '8px 12px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 13, fontWeight: 700, color: tab === id ? '#C2410C' : '#78716C',
+              borderBottom: `2px solid ${tab === id ? '#C2410C' : 'transparent'}`, marginBottom: -1,
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {tab === 'members' ? <MembersTab /> : (
         <div style={{ padding: '18px 22px 20px' }}>
           <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#78716C', marginBottom: 9 }}>
             INVITE AS
@@ -240,6 +255,7 @@ export function InviteModal() {
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   );

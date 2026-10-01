@@ -110,6 +110,7 @@ export function PersonCard({
             </button>
             <button
               ref={plusBtnRef}
+              data-tour="card-plus"
               onClick={handlePlus}
               aria-label={`Add relative to ${fullName(person)}`}
               style={{

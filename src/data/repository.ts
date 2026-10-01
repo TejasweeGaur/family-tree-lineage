@@ -1,5 +1,7 @@
-import type { Person, Union, Archive, MediaItem, Invite, Role, Session, User } from '../types';
+import type { Person, Union, Archive, MediaItem, Invite, Role, Session, User, Tree, Member } from '../types';
+import { preferredTree } from '../utils/lastTree';
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from './seed';
 import type { ImportPlan } from '../utils/csv';
 
@@ -11,6 +13,8 @@ export interface TreeSnapshot {
   rootId: string;
   persons: Person[];
   unions: Union[];
+  /** When anything in the tree last changed. Absent before migration 0004. */
+  updatedAt?: string;
 }
 
 /**
@@ -19,6 +23,9 @@ export interface TreeSnapshot {
  * module load, by whether Supabase credentials are present — so the UI never
  * needs to know which backend it is talking to.
  */
+export type AuthEvent = 'SIGNED_IN' | 'SIGNED_OUT';
+export type Membership = Tree & { role: Role };
+
 export interface Repository {
   readonly kind: 'local' | 'supabase';
 
@@ -26,11 +33,17 @@ export interface Repository {
   getSession(): Promise<Session | null>;
   signInWithGoogle(inviteToken?: string): Promise<Session | null>;
   signOut(): Promise<void>;
-  onAuthChange(cb: (s: Session | null) => void): () => void;
+  /**
+   * Fires on real sign-in and sign-out only. Token refreshes and the initial
+   * session are deliberately not forwarded: the first is noise (it used to
+   * reload the tree hourly) and the second is already handled by getSession().
+   */
+  onAuthChange(cb: (event: AuthEvent, s: Session | null) => void): () => void;
 
   // tree
   loadTree(treeId?: string): Promise<TreeSnapshot>;
-  listTrees(): Promise<Array<{ id: string; name: string }>>;
+  /** Every tree the signed-in user belongs to, with their role in each. */
+  listMemberships(): Promise<Membership[]>;
   createTree(name: string, place: string, country: string): Promise<string>;
 
   // people & relationships
@@ -67,6 +80,14 @@ export interface Repository {
   /** Joins the caller to the invite's tree. Resolves to the tree id. */
   redeemInvite(token: string): Promise<string>;
 
+  // members & tree lifecycle
+  /** Everyone with access to the tree. Admins only. */
+  listMembers(treeId: string): Promise<Member[]>;
+  setMemberRole(treeId: string, userId: string, role: Role): Promise<void>;
+  removeMember(treeId: string, userId: string): Promise<void>;
+  /** Owner only. Removes the tree, everything in it, and its stored files. */
+  deleteTree(treeId: string): Promise<void>;
+
   // bulk
   /** Writes a validated CSV plan in one transaction. Resolves when committed. */
   importPeople(treeId: string, plan: ImportPlan): Promise<void>;
@@ -100,6 +121,24 @@ function displayName(stored: string): string {
   return sep >= 0 ? last.slice(sep + 2) : last;
 }
 
+/**
+ * Best-effort removal of stored objects given bucket-prefixed paths such as
+ * "photos/<tree>/<id>.jpg". Groups by bucket so it's one call per bucket.
+ * Failures only orphan a file, so they don't fail the caller.
+ */
+async function removeStored(sb: SupabaseClient, paths: Array<string | null | undefined>): Promise<void> {
+  const byBucket = new Map<string, string[]>();
+  for (const p of paths) {
+    if (!p || /^(https?:|data:|blob:)/.test(p)) continue;
+    const slash = p.indexOf('/');
+    if (slash < 1) continue;
+    const bucket = p.slice(0, slash);
+    byBucket.set(bucket, [...(byBucket.get(bucket) ?? []), p.slice(slash + 1)]);
+  }
+  await Promise.all([...byBucket].map(([bucket, keys]) =>
+    sb.storage.from(bucket).remove(keys).catch(() => undefined)));
+}
+
 function randomToken(): string {
   const a = new Uint8Array(9);
   crypto.getRandomValues(a);
@@ -114,7 +153,7 @@ function randomToken(): string {
  */
 class LocalRepository implements Repository {
   readonly kind = 'local' as const;
-  private listeners = new Set<(s: Session | null) => void>();
+  private listeners = new Set<(event: AuthEvent, s: Session | null) => void>();
   private invites: Invite[] = [];
 
   async getSession(): Promise<Session | null> {
@@ -135,16 +174,16 @@ class LocalRepository implements Repository {
     const invite = inviteToken ? this.invites.find(i => i.token === inviteToken && !i.revokedAt) : undefined;
     const session: Session = { user: DEMO_USER, role: invite?.role ?? 'admin', treeId: LOCAL_TREE_ID };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    this.listeners.forEach(cb => cb(session));
+    this.listeners.forEach(cb => cb('SIGNED_IN', session));
     return session;
   }
 
   async signOut(): Promise<void> {
     localStorage.removeItem(SESSION_KEY);
-    this.listeners.forEach(cb => cb(null));
+    this.listeners.forEach(cb => cb('SIGNED_OUT', null));
   }
 
-  onAuthChange(cb: (s: Session | null) => void): () => void {
+  onAuthChange(cb: (event: AuthEvent, s: Session | null) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
   }
@@ -162,7 +201,7 @@ class LocalRepository implements Repository {
     };
   }
 
-  async listTrees() { return [{ id: LOCAL_TREE_ID, name: SEED_TREE_NAME }]; }
+  async listMemberships(): Promise<Membership[]> { return []; }
   // A fresh id per call, so creating a second tree in demo mode does not
   // collide with the seeded one.
   async createTree() { return `local-${randomToken()}`; }
@@ -215,6 +254,13 @@ class LocalRepository implements Repository {
 
   // Demo mode has no per-tree storage; the store builds the imported state.
   async importPeople() {}
+
+  async listMembers(): Promise<Member[]> {
+    return [{ userId: DEMO_USER.id, email: DEMO_USER.email, name: DEMO_USER.name, role: 'admin', joinedAt: new Date().toISOString(), isOwner: true }];
+  }
+  async setMemberRole() {}
+  async removeMember() {}
+  async deleteTree() {}
 }
 
 // ---------------------------------------------------------------- supabase
@@ -248,7 +294,9 @@ function personToRow(p: Person, treeId?: string) {
     dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
     occupation: p.occupation, residency: p.residency,
     gotra: p.gotra, shasan: p.shasan, label: p.label, bio: p.bio,
-    photo_url: p.photoUrl ?? null,
+    // photo_url is deliberately absent: setPhoto() owns that column. Writing it
+    // here could store an in-flight upload's data: URL (~100 KB of text) if a
+    // profile was saved while its photo was still uploading.
     origin_father: p.originFather, origin_father_dates: p.originFatherDates,
     origin_mother: p.originMother, origin_mother_dates: p.originMotherDates,
   };
@@ -264,15 +312,22 @@ class SupabaseRepository implements Repository {
     return this.hydrate(data.session.user);
   }
 
-  /** Turn a Supabase auth user into an app session by reading their membership role. */
+  /**
+   * Turn a Supabase auth user into an app session. A user can belong to several
+   * trees; this lands them on the one they last had open, falling back to the
+   * one they joined first. It used to take an arbitrary `limit(1)` row, so a
+   * reload could drop someone into a different family's tree.
+   */
   private async hydrate(authUser: { id: string; email?: string; user_metadata?: Record<string, unknown> }): Promise<Session | null> {
     const sb = requireSupabase();
-    const { data: m } = await sb
+    const { data: rows } = await sb
       .from('memberships')
       .select('role, tree_id')
       .eq('user_id', authUser.id)
-      .limit(1)
-      .maybeSingle();
+      .order('joined_at');
+
+    const preferred = preferredTree(authUser.id);
+    const m = rows?.find(r => r.tree_id === preferred) ?? rows?.[0];
 
     const meta = authUser.user_metadata ?? {};
     return {
@@ -305,13 +360,23 @@ class SupabaseRepository implements Repository {
     await requireSupabase().auth.signOut();
   }
 
-  onAuthChange(cb: (s: Session | null) => void): () => void {
+  onAuthChange(cb: (event: AuthEvent, s: Session | null) => void): () => void {
     const sb = requireSupabase();
-    const { data } = sb.auth.onAuthStateChange(async (_e, session) => {
-      cb(session ? await this.hydrate(session.user) : null);
+    const { data } = sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') { cb('SIGNED_OUT', null); return; }
+      // INITIAL_SESSION is covered by getSession(); TOKEN_REFRESHED and
+      // USER_UPDATED change nothing the app displays. Supabase also re-emits
+      // SIGNED_IN when a tab regains focus — the store de-duplicates that.
+      if (event !== 'SIGNED_IN' || !session) return;
+      // Deferred: awaiting the Supabase client inside this callback can
+      // deadlock it (documented supabase-js behaviour). The old code did.
+      setTimeout(() => {
+        void this.hydrate(session.user).then(s => cb('SIGNED_IN', s));
+      }, 0);
     });
     return () => data.subscription.unsubscribe();
   }
+
 
   async loadTree(treeId?: string): Promise<TreeSnapshot> {
     const sb = requireSupabase();
@@ -320,7 +385,9 @@ class SupabaseRepository implements Repository {
 
     const { data: tree, error: te } = await sb
       .from('trees')
-      .select('id, name, origin_place, origin_country, root_person_id')
+      // '*' rather than a column list: updated_at only exists after migration
+      // 0004, and naming it here would break every load until that's run.
+      .select('*')
       .eq('id', treeId)
       .maybeSingle();
     if (te) throw te;
@@ -382,17 +449,35 @@ class SupabaseRepository implements Repository {
       treeName: tree.name,
       originPlace: tree.origin_place,
       originCountry: tree.origin_country,
+      updatedAt: tree.updated_at ?? undefined,
       rootId: tree.root_person_id ?? persons[0]?.id ?? '',
       persons,
       unions,
     };
   }
 
-  async listTrees() {
+  async listMemberships(): Promise<Membership[]> {
     const sb = requireSupabase();
-    const { data, error } = await sb.from('trees').select('id, name').order('created_at');
+    const { data: u } = await sb.auth.getUser();
+    if (!u.user) return [];
+    const { data, error } = await sb
+      .from('memberships')
+      .select('role, trees ( id, name, origin_place, origin_country, created_by )')
+      .eq('user_id', u.user.id)
+      .order('joined_at');
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []).flatMap(r => {
+      // PostgREST types a to-one embed as an array or object depending on
+      // inference; handle both.
+      const t = (Array.isArray(r.trees) ? r.trees[0] : r.trees) as
+        { id: string; name: string; origin_place: string; origin_country: string; created_by: string } | null;
+      return t ? [{
+        id: t.id, name: t.name,
+        originPlace: t.origin_place ?? '', originCountry: t.origin_country ?? '',
+        role: r.role as Role,
+        ownerId: t.created_by,
+      }] : [];
+    });
   }
 
   async createTree(name: string, place: string, country: string): Promise<string> {
@@ -419,8 +504,24 @@ class SupabaseRepository implements Repository {
   }
 
   async deletePerson(id: string): Promise<void> {
-    const { error } = await requireSupabase().from('persons').delete().eq('id', id);
+    const sb = requireSupabase();
+    // Collect the person's files first: the row delete cascades to their
+    // archive and media rows, after which there'd be no record of the paths.
+    const [{ data: p }, { data: arc }, { data: med }] = await Promise.all([
+      sb.from('persons').select('photo_url').eq('id', id).maybeSingle(),
+      sb.from('archive_records').select('file_url').eq('person_id', id),
+      sb.from('media_items').select('url').eq('person_id', id),
+    ]);
+
+    const { error } = await sb.from('persons').delete().eq('id', id);
     if (error) throw error;
+
+    // Then the files. Previously they were left in storage forever.
+    await removeStored(sb, [
+      p?.photo_url,
+      ...(arc ?? []).map(a => a.file_url),
+      ...(med ?? []).map(m => m.url),
+    ]);
   }
 
   async createUnion(treeId: string, u: Union): Promise<Union> {
@@ -666,6 +767,63 @@ class SupabaseRepository implements Repository {
    * reads the role from the stored invite row, so the ?role= on the link is
    * decoration and cannot be tampered with.
    */
+  async listMembers(treeId: string): Promise<Member[]> {
+    const { data, error } = await requireSupabase().rpc('list_members', { p_tree: treeId });
+    if (error) throw error;
+    return ((data ?? []) as Array<{
+      user_id: string; email: string; name: string; avatar_url: string | null;
+      role: Role; joined_at: string; is_owner: boolean;
+    }>).map(m => ({
+      userId: m.user_id, email: m.email, name: m.name, avatarUrl: m.avatar_url ?? undefined,
+      role: m.role, joinedAt: m.joined_at, isOwner: m.is_owner,
+    }));
+  }
+
+  // RLS turns a disallowed write into "0 rows affected" rather than an error,
+  // so both of these check the count and say so instead of failing silently.
+  async setMemberRole(treeId: string, userId: string, role: Role): Promise<void> {
+    const { error, count } = await requireSupabase()
+      .from('memberships').update({ role }, { count: 'exact' })
+      .eq('tree_id', treeId).eq('user_id', userId);
+    if (error) throw error;
+    if (!count) throw new Error('That change was not allowed.');
+  }
+
+  async removeMember(treeId: string, userId: string): Promise<void> {
+    const { error, count } = await requireSupabase()
+      .from('memberships').delete({ count: 'exact' })
+      .eq('tree_id', treeId).eq('user_id', userId);
+    if (error) throw error;
+    if (!count) throw new Error('That person could not be removed.');
+  }
+
+  async deleteTree(treeId: string): Promise<void> {
+    const sb = requireSupabase();
+    const { data: u } = await sb.auth.getUser();
+    const { data: tree, error: te } = await sb.from('trees').select('created_by').eq('id', treeId).maybeSingle();
+    if (te) throw te;
+    if (!tree) throw new Error('That tree no longer exists.');
+    // Checked up front: files go first (below), so a refusal must come before them.
+    if (tree.created_by !== u.user?.id) throw new Error("Only the tree's owner can delete it.");
+
+    // Files before rows. Storage access comes from tree membership, which the
+    // row delete removes — after it, these files could no longer be deleted.
+    const [{ data: ps }, { data: arc }, { data: med }] = await Promise.all([
+      sb.from('persons').select('photo_url').eq('tree_id', treeId),
+      sb.from('archive_records').select('file_url, persons!inner(tree_id)').eq('persons.tree_id', treeId),
+      sb.from('media_items').select('url, persons!inner(tree_id)').eq('persons.tree_id', treeId),
+    ]);
+    await removeStored(sb, [
+      ...(ps ?? []).map(p => p.photo_url),
+      ...(arc ?? []).map(a => a.file_url),
+      ...(med ?? []).map(m => m.url),
+    ]);
+
+    const { error, count } = await sb.from('trees').delete({ count: 'exact' }).eq('id', treeId);
+    if (error) throw error;
+    if (!count) throw new Error('The tree was not deleted. Its files were removed — try again to finish.');
+  }
+
   async redeemInvite(token: string): Promise<string> {
     const sb = requireSupabase();
     const { data, error } = await sb.rpc('redeem_invite', { invite_token: token });

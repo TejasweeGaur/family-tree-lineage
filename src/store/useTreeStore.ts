@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type {
-  Person, Union, Tree, Invite, Session, Role,
+  Person, Union, Tree, Invite, Session, Role, Member,
   PanelTab, ViewMode, PanelMode, CanvasMode,
   FormState, FormValues, ArchiveFormState, Archive, MediaItem, DirSortKey, Gender,
   RelativeKind, AddDialogState, ViewerRecord,
@@ -9,9 +9,19 @@ import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from '../data
 import { spousesOf, parentsOf, unionsOf, childrenOf, getRoot, fullName } from '../utils/kinship';
 import { computeLayout } from '../utils/layout';
 import { repo } from '../data/repository';
+import { rememberTree } from '../utils/lastTree';
+import { runTour, markTourSeen } from '../utils/tour';
+import { ARCHIVE_MAX_BYTES, formatBytes } from '../config/limits';
 import { readScaledPhoto } from '../utils/image';
 import { exportPeopleCsv, templateCsv, planImport, type ImportPlan } from '../utils/csv';
 import { triggerDownload } from '../utils/export';
+
+/**
+ * The user whose tree is already loaded (or loading). Supabase re-emits
+ * SIGNED_IN on tab focus and after redirects; without this guard each one
+ * reloaded the tree and collapsed every branch the user had opened.
+ */
+let loadedFor: string | null = null;
 
 const initialCollapsed: Record<string, boolean> = {};
 SEED_UNIONS.forEach(u => { if (u.id !== 'u1') initialCollapsed[u.id] = true; });
@@ -102,6 +112,14 @@ interface AppState {
   copied: boolean;
   newTreeOpen: boolean;
   viewerRecord: ViewerRecord | null;
+  /** When the active tree last changed; drives the footer. Null if unknown. */
+  treeUpdatedAt: string | null;
+  aboutOpen: boolean;
+  onThisDayOpen: boolean;
+  members: Member[];
+  membersLoading: boolean;
+  deleteTreeOpen: boolean;
+  deletingTree: boolean;
   /** Full-screen profile photo viewer: the stored path plus whose it is. */
   photoView: { stored: string; name: string } | null;
   /** A parsed, validated CSV awaiting confirmation. Nothing is written yet. */
@@ -244,6 +262,18 @@ type Store = AppState & {
   // Viewer
   openViewer: (record: ViewerRecord) => void;
   closeViewer: () => void;
+  setAboutOpen: (v: boolean) => void;
+  setOnThisDayOpen: (v: boolean) => void;
+  startTour: () => void;
+  /** True for the tree's creator, who alone can delete it. */
+  isOwner: () => boolean;
+  loadMembers: () => Promise<void>;
+  setMemberRole: (userId: string, role: Role) => Promise<void>;
+  removeMember: (userId: string) => Promise<void>;
+  setDeleteTreeOpen: (v: boolean) => void;
+  deleteActiveTree: () => Promise<void>;
+  /** After losing access to the active tree: open another, or the first-run screen. */
+  moveToNextTree: () => Promise<void>;
   openPhotoView: (stored: string, name: string) => void;
   closePhotoView: () => void;
 
@@ -329,6 +359,13 @@ export const useTreeStore = create<Store>((set, get) => ({
   copied: false,
   newTreeOpen: false,
   viewerRecord: null,
+  treeUpdatedAt: null,
+  aboutOpen: false,
+  onThisDayOpen: false,
+  members: [],
+  membersLoading: false,
+  deleteTreeOpen: false,
+  deletingTree: false,
   photoView: null,
   csvPlan: null,
   csvImporting: false,
@@ -359,10 +396,16 @@ export const useTreeStore = create<Store>((set, get) => ({
     const session = await repo.getSession();
     set({ session, authReady: true });
 
-    repo.onAuthChange(s => {
+    repo.onAuthChange((event, s) => {
+      if (event === 'SIGNED_OUT') {
+        loadedFor = null;
+        set({ session: null });
+        return;
+      }
+      if (!s || repo.kind !== 'supabase') { set({ session: s }); return; }
+      if (s.user.id === loadedFor) return; // already loaded: tab focus, redirect echo
+      loadedFor = s.user.id;
       set({ session: s });
-      // A sign-in completing after an OAuth redirect arrives here, not above.
-      if (repo.kind !== 'supabase' || !s) return;
       // An invite has to be redeemed before loading: until the membership row
       // exists, RLS returns nothing and the tree looks empty.
       if (get().pendingInvite) void get().redeemPendingInvite();
@@ -370,6 +413,8 @@ export const useTreeStore = create<Store>((set, get) => ({
     });
 
     if (repo.kind === 'supabase' && session) {
+      // Claimed before awaiting, so a SIGNED_IN arriving mid-load is ignored.
+      loadedFor = session.user.id;
       if (get().pendingInvite) await get().redeemPendingInvite();
       else if (session.treeId) await get().loadActiveTree(session.treeId);
     }
@@ -377,18 +422,36 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   loadActiveTree: async (treeId: string) => {
     try {
-      const snap = await repo.loadTree(treeId);
+      const [snap, memberships] = await Promise.all([
+        repo.loadTree(treeId),
+        repo.kind === 'supabase' ? repo.listMemberships() : Promise.resolve(null),
+      ]);
       const collapsed: Record<string, boolean> = {};
       snap.unions.forEach(u => { if (u.a !== snap.rootId && u.b !== snap.rootId) collapsed[u.id] = true; });
-      set({
+
+      const uid = get().session?.user.id;
+      if (uid) rememberTree(uid, snap.treeId);
+      // Role is per tree: being an admin of one family's tree says nothing about
+      // another. It was previously taken from one membership and applied to all.
+      const role = memberships?.find(m => m.id === snap.treeId)?.role;
+
+      set(s => ({
         persons: snap.persons, unions: snap.unions, rootId: snap.rootId,
         activeTreeId: snap.treeId, collapsed,
-        trees: [{ id: snap.treeId, name: snap.treeName, originPlace: snap.originPlace, originCountry: snap.originCountry }],
-      });
+        treeUpdatedAt: snap.updatedAt ?? null,
+        // Every tree the user belongs to, so the switcher can reach them all.
+        trees: memberships?.length
+          ? memberships
+          : [{ id: snap.treeId, name: snap.treeName, originPlace: snap.originPlace, originCountry: snap.originCountry }],
+        session: s.session
+          ? { ...s.session, treeId: snap.treeId, role: role ?? s.session.role }
+          : s.session,
+      }));
     } catch (e) {
       set({ notice: e instanceof Error ? e.message : 'Could not load the family tree.' });
     }
   },
+
 
   /**
    * First-run bootstrap: an authenticated user with no membership creates their
@@ -398,11 +461,14 @@ export const useTreeStore = create<Store>((set, get) => ({
     set({ creatingTree: true, authError: '' });
     try {
       const treeId = await repo.createTree(name, place, country);
+      const uid = get().session?.user.id;
+      if (uid) rememberTree(uid, treeId);
       set(s => ({
         session: s.session ? { ...s.session, treeId, role: 'admin' } : s.session,
         activeTreeId: treeId,
         persons: [], unions: [], rootId: '', collapsed: {},
         trees: [{ id: treeId, name, originPlace: place, originCountry: country }],
+        treeUpdatedAt: new Date().toISOString(),
       }));
     } catch (e) {
       set({ authError: e instanceof Error ? e.message : 'Could not create the archive.' });
@@ -426,7 +492,13 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   signOut: async () => {
     await repo.signOut();
+    loadedFor = null;
     set({ session: null, userMenu: false, panel: null, focus: null });
+    // On a shared family computer the next person to sign in shouldn't have
+    // the previous account's tree sitting in memory behind the sign-in screen.
+    if (repo.kind === 'supabase') {
+      set({ persons: [], unions: [], rootId: '', trees: [], activeTreeId: '', collapsed: {}, treeCache: {} });
+    }
   },
 
   isAdmin: () => get().session?.role === 'admin',
@@ -648,7 +720,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       const u = newUnions.find(x => x.a === form.targetId || x.b === form.targetId);
       if (u) { u.date = v.mdate; u.place = v.mplace; }
 
-      set({ persons: newPersons, unions: newUnions, form: null, savingForm: false });
+      set({ persons: newPersons, unions: newUnions, form: null, savingForm: false, treeUpdatedAt: new Date().toISOString() });
       const edited = newPersons.find(p => p.id === form.targetId);
       try {
         if (edited) await repo.updatePerson(edited);
@@ -757,6 +829,7 @@ export const useTreeStore = create<Store>((set, get) => ({
         persons: newPersons, unions: newUnions, collapsed: newCollapsed,
         // The first person becomes the root; afterwards the root never moves.
         rootId: s.rootId || id,
+        treeUpdatedAt: new Date().toISOString(), 
         // Back to the tree, not into the detail panel: adding is always started
         // from the tree, and entering several people in a row means dismissing
         // a panel every time. The new card is focused so it's easy to spot.
@@ -810,7 +883,7 @@ export const useTreeStore = create<Store>((set, get) => ({
     }));
     set({
       persons: newPersons, unions: newUnions,
-      confirmDeleteId: null, form: null,
+      confirmDeleteId: null, form: null, treeUpdatedAt: new Date().toISOString(), 
       panel: null, focus: null,
     });
   },
@@ -827,6 +900,7 @@ export const useTreeStore = create<Store>((set, get) => ({
     }));
     void repo.setPhoto(activeTreeId, id, dataUrl)
       .then(stored => set(s => ({
+        treeUpdatedAt: new Date().toISOString(), 
         persons: s.persons.map(p => p.id === id ? { ...p, photoUrl: stored ?? undefined } : p),
       })))
       .catch((e: unknown) => set({
@@ -871,6 +945,13 @@ export const useTreeStore = create<Store>((set, get) => ({
       origin: archiveForm.origin,
     };
 
+    // Last line of defence before upload; the form checks first, the storage
+    // bucket enforces it regardless.
+    if (archiveForm.fileData && archiveForm.fileData.size > ARCHIVE_MAX_BYTES) {
+      set({ notice: `That file is over the ${formatBytes(ARCHIVE_MAX_BYTES)} limit.` });
+      return;
+    }
+
     set({ savingArchive: true });
     try {
       if (archiveForm.editId) {
@@ -886,7 +967,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           persons: s.persons.map(p => p.id === targetId
             ? { ...p, archives: p.archives.map(a => a.id === saved.id ? saved : a) } : p),
           archiveForm: null, panel: targetId, panelTab: 'archives',
-          savingArchive: false, notice: 'Archive record updated',
+          savingArchive: false, notice: 'Archive record updated', treeUpdatedAt: new Date().toISOString(),
         }));
         return;
       }
@@ -898,7 +979,7 @@ export const useTreeStore = create<Store>((set, get) => ({
         persons: s.persons.map(p => p.id === targetId
           ? { ...p, archives: [...p.archives, saved] } : p),
         archiveForm: null, panel: targetId, panelTab: 'archives',
-        savingArchive: false,
+        savingArchive: false, treeUpdatedAt: new Date().toISOString(),
       }));
     } catch (e) {
       // Form stays open with the entry intact.
@@ -920,7 +1001,7 @@ export const useTreeStore = create<Store>((set, get) => ({
         persons: s.persons.map(p => p.id === personId
           ? { ...p, archives: p.archives.filter(a => a.id !== archiveId) }
           : p),
-        notice: 'Archive record deleted',
+        notice: 'Archive record deleted', treeUpdatedAt: new Date().toISOString(),
       }));
     } catch (e) {
       set({ notice: e instanceof Error ? e.message : 'Could not delete that record.' });
@@ -961,7 +1042,7 @@ export const useTreeStore = create<Store>((set, get) => ({
         id !== rootId && !newUnions.some(x => x.a === id || x.b === id || x.children.includes(id)));
 
       set({
-        unions: newUnions,
+        unions: newUnions, treeUpdatedAt: new Date().toISOString(), 
         notice: stranded.length
           ? `Link removed. ${stranded.map(nameOf).join(' and ')} ${stranded.length === 1 ? 'is' : 'are'} no longer connected to the tree — find them in Directory view to re-link or delete.`
           : 'Marriage link removed',
@@ -991,6 +1072,7 @@ export const useTreeStore = create<Store>((set, get) => ({
         const saved = await repo.addMedia(activeTreeId, personId, draft, blob);
         set(s => ({
           persons: s.persons.map(p => p.id === personId ? { ...p, media: [...p.media, saved] } : p),
+          treeUpdatedAt: new Date().toISOString(),
         }));
       } catch {
         failed.push(file.name);
@@ -1017,7 +1099,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           ? { ...p, media: p.media.filter(m => m.id !== mediaId) }
           : p),
         viewerRecord: null,
-        notice: 'Photo removed from the gallery',
+        notice: 'Photo removed from the gallery', treeUpdatedAt: new Date().toISOString(),
       }));
     } catch (e) {
       set({ notice: e instanceof Error ? e.message : 'Could not remove that photo.' });
@@ -1098,6 +1180,114 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   openViewer: record => set({ viewerRecord: record }),
   closeViewer: () => set({ viewerRecord: null }),
+  setAboutOpen: v => set({ aboutOpen: v, userMenu: false }),
+  setOnThisDayOpen: v => set({ onThisDayOpen: v }),
+  isOwner: () => {
+    const { session, trees, activeTreeId } = get();
+    // Demo mode has no owners; there, any admin may delete.
+    if (repo.kind === 'local') return get().isAdmin();
+    return !!session && trees.find(t => t.id === activeTreeId)?.ownerId === session.user.id;
+  },
+
+  loadMembers: async () => {
+    const { activeTreeId } = get();
+    set({ membersLoading: true });
+    try {
+      set({ members: await repo.listMembers(activeTreeId) });
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not load the member list.' });
+    } finally {
+      set({ membersLoading: false });
+    }
+  },
+
+  setMemberRole: async (userId, role) => {
+    const { activeTreeId, session } = get();
+    try {
+      await repo.setMemberRole(activeTreeId, userId, role);
+      set(s => ({ members: s.members.map(m => m.userId === userId ? { ...m, role } : m) }));
+      // Demoting yourself: the admin-only screens no longer apply.
+      if (userId === session?.user.id && role === 'viewer') {
+        set(s => ({
+          session: s.session ? { ...s.session, role: 'viewer' } : s.session,
+          trees: s.trees.map(t => t.id === activeTreeId ? { ...t, role: 'viewer' } : t),
+          inviteOpen: false,
+          notice: 'You are now a viewer of this tree',
+        }));
+      }
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not change that role.' });
+    }
+  },
+
+  removeMember: async userId => {
+    const { activeTreeId, session } = get();
+    try {
+      await repo.removeMember(activeTreeId, userId);
+      if (userId === session?.user.id) {
+        set({ inviteOpen: false, notice: 'You have left this tree' });
+        await get().moveToNextTree();
+        return;
+      }
+      set(s => ({ members: s.members.filter(m => m.userId !== userId), notice: 'Access removed' }));
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not remove that person.' });
+    }
+  },
+
+  setDeleteTreeOpen: v => set({ deleteTreeOpen: v, treeMenu: false }),
+
+  deleteActiveTree: async () => {
+    const { activeTreeId, trees, deletingTree } = get();
+    if (deletingTree) return;
+    const name = trees.find(t => t.id === activeTreeId)?.name ?? 'The';
+    set({ deletingTree: true });
+    try {
+      await repo.deleteTree(activeTreeId);
+      set(s => {
+        const { [activeTreeId]: _gone, ...treeCache } = s.treeCache;
+        void _gone;
+        return {
+          deleteTreeOpen: false, deletingTree: false, treeCache,
+          trees: s.trees.filter(t => t.id !== activeTreeId),
+          panel: null, focus: null, branch: null,
+          notice: `${name} Family Tree has been deleted`,
+        };
+      });
+      await get().moveToNextTree();
+    } catch (e) {
+      set({ deletingTree: false, notice: e instanceof Error ? e.message : 'Could not delete the tree.' });
+    }
+  },
+
+  moveToNextTree: async () => {
+    const { activeTreeId } = get();
+    if (repo.kind === 'supabase') {
+      const next = (await repo.listMemberships()).find(m => m.id !== activeTreeId);
+      if (next) { await get().loadActiveTree(next.id); return; }
+    } else {
+      const next = get().trees.find(t => t.id !== activeTreeId);
+      if (next) { await get().switchTree(next.id); return; }
+    }
+    // Nothing left: back to the first-run "create your archive" screen.
+    set(s => ({
+      session: s.session ? { ...s.session, treeId: null } : s.session,
+      persons: [], unions: [], rootId: '', trees: [], activeTreeId: '', collapsed: {},
+    }));
+  },
+
+  startTour: () => {
+    const { session, trees, activeTreeId } = get();
+    // Close anything that would sit over the elements the tour points at.
+    set({
+      userMenu: false, treeMenu: false, exportMenu: false, dataMenu: false, plusMenu: null,
+      panel: null, aboutOpen: false, onThisDayOpen: false, inviteOpen: false,
+    });
+    if (session) markTourSeen(session.user.id);
+    const treeName = trees.find(t => t.id === activeTreeId)?.name ?? 'Family';
+    // A beat for the closed overlays to leave the DOM before measuring targets.
+    setTimeout(() => { void runTour({ isAdmin: get().isAdmin(), treeName }); }, 60);
+  },
   openPhotoView: (stored, name) => set({ photoView: { stored, name } }),
   closePhotoView: () => set({ photoView: null }),
 
@@ -1193,6 +1383,13 @@ export const useTreeStore = create<Store>((set, get) => ({
       // The id comes back from the backend rather than nid(): a client-invented
       // id would never match the row, and every later write would miss.
       const id = await repo.createTree(name, place, country);
+      if (repo.kind === 'supabase') {
+        // Load it like any other tree: refreshes the switcher list and sets
+        // the role from the new membership (admin) rather than assuming it.
+        set({ treeMenu: false, newTreeOpen: false, focus: null, panel: null, branch: null });
+        await get().loadActiveTree(id);
+        return;
+      }
       set(s => ({
         trees: [...s.trees, { id, name, originPlace: place, originCountry: country }],
         // Park the outgoing tree, same as switchTree, or it is lost on switch back.
