@@ -1455,39 +1455,62 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   getMatchSet: () => {
     const { filters, persons, unions } = get();
-    const { q, gender, status, from, to, showRelatives } = filters;
-    const active = !!(q || gender !== 'All' || status !== 'All' || from || to);
-    if (!active) return null;
-
-    const hit: Record<string, boolean | 'rel'> = {};
-    const needle = q.trim().toLowerCase();
-
-    persons.forEach(p => {
-      let ok = true;
-      if (needle) ok = `${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(needle);
-      if (ok && gender !== 'All') ok = p.gender === gender;
-      if (ok && status === 'Living') ok = !p.dod;
-      if (ok && status === 'Deceased') ok = !!p.dod;
-      const yr = parseInt(p.dob?.slice(0, 4) || '0', 10);
-      if (ok && from) ok = yr >= parseInt(from, 10);
-      if (ok && to) ok = yr <= parseInt(to, 10);
-      if (ok) hit[p.id] = true;
-    });
-
-    if (showRelatives) {
-      const data = { persons, unions };
-      Object.keys(hit).forEach(id => {
-        [...parentsOf(data, id), ...spousesOf(data, id), ...unionsOf(data, id).flatMap(u => u.children)]
-          .forEach(r => { if (!hit[r]) hit[r] = 'rel'; });
-      });
-    }
-    return hit;
+    return memo(matchMemo, [filters, persons, unions], () => matchSet(filters, persons, unions));
   },
 
   getLayout: () => {
     const { persons, unions, collapsed, focus, branch } = get();
-    return computeLayout(
-      { persons, unions }, collapsed, focus, get().isAdmin(), get().getMatchSet(), branch,
-    );
+    const admin = get().isAdmin();
+    const matches = get().getMatchSet();
+    return memo(layoutMemo, [persons, unions, collapsed, focus, branch, admin, matches], () =>
+      computeLayout({ persons, unions }, collapsed, focus, admin, matches, branch));
   },
 }));
+
+/**
+ * The tree's layout and filter matches are derived from a handful of state
+ * fields, but read on every render of the canvas. Recomputing them only when
+ * one of those fields changes keeps typing in a form or opening a menu from
+ * re-running the layout of the whole tree.
+ */
+type Memo<T> = { deps: unknown[]; value: T } | null;
+const matchMemo: { current: Memo<Record<string, boolean | 'rel'> | null> } = { current: null };
+const layoutMemo: { current: Memo<ReturnType<typeof computeLayout>> } = { current: null };
+
+function memo<T>(slot: { current: Memo<T> }, deps: unknown[], compute: () => T): T {
+  const prev = slot.current;
+  if (prev && prev.deps.length === deps.length && prev.deps.every((d, i) => d === deps[i])) return prev.value;
+  const value = compute();
+  slot.current = { deps, value };
+  return value;
+}
+
+function matchSet(filters: Store['filters'], persons: Person[], unions: Union[]): Record<string, boolean | 'rel'> | null {
+  const { q, gender, status, from, to, showRelatives } = filters;
+  const active = !!(q || gender !== 'All' || status !== 'All' || from || to);
+  if (!active) return null;
+
+  const hit: Record<string, boolean | 'rel'> = {};
+  const needle = q.trim().toLowerCase();
+
+  persons.forEach(p => {
+    let ok = true;
+    if (needle) ok = `${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(needle);
+    if (ok && gender !== 'All') ok = p.gender === gender;
+    if (ok && status === 'Living') ok = !p.dod;
+    if (ok && status === 'Deceased') ok = !!p.dod;
+    const yr = parseInt(p.dob?.slice(0, 4) || '0', 10);
+    if (ok && from) ok = yr >= parseInt(from, 10);
+    if (ok && to) ok = yr <= parseInt(to, 10);
+    if (ok) hit[p.id] = true;
+  });
+
+  if (showRelatives) {
+    const data = { persons, unions };
+    Object.keys(hit).forEach(id => {
+      [...parentsOf(data, id), ...spousesOf(data, id), ...unionsOf(data, id).flatMap(u => u.children)]
+        .forEach(r => { if (!hit[r]) hit[r] = 'rel'; });
+    });
+  }
+  return hit;
+}

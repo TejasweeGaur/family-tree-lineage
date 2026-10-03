@@ -1,35 +1,44 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { PersonCard } from './PersonCard';
 import { fullName, spousesOf, parentsOf, unionsOf, kin, branchSet } from '../utils/kinship';
 import { shortDate } from '../utils/dates';
 
 export function TreeCanvas() {
-  const store = useTreeStore();
-  const {
-    persons, unions, focus, branch, zoom, mode, winW,
-    toggleUnion, setFocus, setBranch, openEdit, openAdd,
-    setZoom, closeAllMenus, revealTarget, consumeReveal,
-  } = store;
+  // Field-by-field subscriptions: the canvas re-renders when something it
+  // draws changes, not on every keystroke in a form or toggle of a menu.
+  const persons = useTreeStore(s => s.persons);
+  const unions = useTreeStore(s => s.unions);
+  const focus = useTreeStore(s => s.focus);
+  const branch = useTreeStore(s => s.branch);
+  const zoom = useTreeStore(s => s.zoom);
+  const mode = useTreeStore(s => s.mode);
+  const winW = useTreeStore(s => s.winW);
+  const revealTarget = useTreeStore(s => s.revealTarget);
+  const isAdmin = useTreeStore(s => s.isAdmin());
+  const { toggleUnion, setFocus, setBranch, openEdit, openAdd, setZoom, closeAllMenus, consumeReveal } =
+    useTreeStore.getState();
+  // Memoised in the store, so these only recompute when the tree, the
+  // filters, the focus or the collapsed branches change.
+  const layout = useTreeStore(s => s.getLayout());
+  const matchSet = useTreeStore(s => s.getMatchSet());
 
-  const isAdmin = store.isAdmin();
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const data = { persons, unions };
-
-  const layout = store.getLayout();
+  const data = useMemo(() => ({ persons, unions }), [persons, unions]);
   const { nodes, links, hits, conns, pills, extras, w: canvasW, h: canvasH } = layout;
-  const matchSet = store.getMatchSet();
 
   // Which cards stay bright: the focused person's immediate family, or the
   // whole lineage under a highlighted branch.
-  const bright: Record<string, boolean> | null = (() => {
+  const bright = useMemo((): Record<string, boolean> | null => {
     if (branch) return branchSet(data, branch);
     if (!focus) return null;
     const set: Record<string, boolean> = { [focus]: true };
     [...parentsOf(data, focus), ...spousesOf(data, focus), ...unionsOf(data, focus).flatMap(u => u.children)]
       .forEach(r => { set[r] = true; });
     return set;
-  })();
+  }, [data, branch, focus]);
+
+  const byId = useMemo(() => new Map(persons.map(p => [p.id, p])), [persons]);
 
   const vis = (id: string) => !matchSet || !!matchSet[id];
 
@@ -206,9 +215,9 @@ export function TreeCanvas() {
           ))}
 
           {nodes.map(n => {
-            const person = persons.find(p => p.id === n.id);
+            const person = byId.get(n.id);
             if (!person) return null;
-            const sp = spousesOf(data, n.id).map(id => persons.find(p => p.id === id)).find(Boolean);
+            const sp = spousesOf(data, n.id).map(id => byId.get(id)).find(Boolean);
             const u = unionsOf(data, n.id)[0];
             return (
               <PersonCard

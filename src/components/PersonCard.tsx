@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { memo, useRef } from 'react';
 import { palette } from '../utils/palette';
 import { lifeDates } from '../utils/dates';
 import { initials, fullName, cardName } from '../utils/kinship';
@@ -19,7 +19,12 @@ interface Props {
   kinChip: string;
 }
 
-export function PersonCard({
+/**
+ * Memoised: the props are primitives plus the person object, which only
+ * changes identity when that person is edited, so an unchanged card skips
+ * re-rendering when something elsewhere in the tree changes.
+ */
+export const PersonCard = memo(function PersonCard({
   person, x, y, isFocus, isDim, isVisible, spouseName, mdate, city, kinChip,
 }: Props) {
   const isAdmin = useTreeStore(s => s.isAdmin());
@@ -210,4 +215,4 @@ export function PersonCard({
       )}
     </div>
   );
-}
+});

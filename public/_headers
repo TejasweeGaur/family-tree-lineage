@@ -1,7 +1,13 @@
-# Cloudflare Pages response headers (applied to every path).
+# Cloudflare response headers (applied to every path).
 /*
   # No embedding in other sites' frames: blocks clickjacking against signed-in relatives.
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Built JS and CSS carry a content hash in their names, so a changed file always
+# has a new name. Browsers can keep these for a year without re-checking;
+# index.html stays uncached, so a new deploy is still picked up on the next visit.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

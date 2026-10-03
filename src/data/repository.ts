@@ -265,6 +265,13 @@ class LocalRepository implements Repository {
 
 // ---------------------------------------------------------------- supabase
 
+/**
+ * Cache lifetime for uploaded files, in seconds. Every upload gets a fresh
+ * path and nothing is ever overwritten in place, so a file never changes
+ * under its name and the browser can keep it for a year.
+ */
+const IMMUTABLE = '31536000';
+
 type PersonRow = {
   id: string; first: string; last: string; maiden: string; gender: Person['gender'];
   dob: string; pob: string; dod: string; pod: string;
@@ -384,63 +391,60 @@ class SupabaseRepository implements Repository {
 
     if (!treeId) throw new Error('No family archive selected.');
 
-    const { data: tree, error: te } = await sb
-      .from('trees')
-      // '*' rather than a column list: updated_at only exists after migration
-      // 0004, and naming it here would break every load until that's run.
-      .select('*')
-      .eq('id', treeId)
-      .maybeSingle();
+    // Three requests in parallel, each scoped to this tree. Records, media and
+    // child links come embedded with their person or union, so nothing is
+    // fetched for the other trees the user belongs to.
+    const [
+      { data: tree, error: te },
+      { data: pRows, error: pe },
+      { data: uRows, error: ue },
+    ] = await Promise.all([
+      sb.from('trees')
+        // '*' rather than a column list: updated_at only exists after migration
+        // 0004, and naming it here would break every load until that's run.
+        .select('*')
+        .eq('id', treeId)
+        .maybeSingle(),
+      sb.from('persons')
+        .select('*, archive_records (*), media_items (*)')
+        .eq('tree_id', treeId)
+        .order('created_at')
+        .order('created_at', { referencedTable: 'archive_records' })
+        .order('created_at', { referencedTable: 'media_items' }),
+      sb.from('unions')
+        .select('*, union_children (child_id)')
+        .eq('tree_id', treeId),
+    ]);
     if (te) throw te;
     if (!tree) throw new Error('Tree not found or you are not a member of it.');
-
-    const [{ data: pRows, error: pe }, { data: uRows, error: ue }, { data: ucRows }, { data: aRows }, { data: mRows }] =
-      await Promise.all([
-        sb.from('persons').select('*').eq('tree_id', tree.id).order('created_at'),
-        sb.from('unions').select('*').eq('tree_id', tree.id),
-        sb.from('union_children').select('union_id, child_id'),
-        sb.from('archive_records').select('*'),
-        sb.from('media_items').select('*'),
-      ]);
     if (pe) throw pe;
     if (ue) throw ue;
 
-    const archivesBy = new Map<string, Archive[]>();
-    (aRows ?? []).forEach(a => {
-      const list = archivesBy.get(a.person_id) ?? [];
-      list.push({
-        id: a.id, title: a.title, year: a.year, category: a.category,
-        desc: a.descr, origin: a.origin,
-        filePath: a.file_url ?? undefined,
-        fileName: a.file_url ? displayName(a.file_url) : undefined,
-      });
-      archivesBy.set(a.person_id, list);
+    type ArchiveRow = { id: string; title: string; year: string; category: string; descr: string; origin: string; file_url: string | null };
+    type MediaRow = { id: string; title: string; kind: MediaItem['type']; size_bytes: number; url: string | null };
+    const toArchive = (a: ArchiveRow): Archive => ({
+      id: a.id, title: a.title, year: a.year, category: a.category,
+      desc: a.descr, origin: a.origin,
+      filePath: a.file_url ?? undefined,
+      fileName: a.file_url ? displayName(a.file_url) : undefined,
+    });
+    const toMedia = (m: MediaRow): MediaItem => ({
+      id: m.id, title: m.title, type: m.kind,
+      size: m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(1)} MB` : '',
+      url: m.url ?? undefined,
     });
 
-    const mediaBy = new Map<string, MediaItem[]>();
-    (mRows ?? []).forEach(m => {
-      const list = mediaBy.get(m.person_id) ?? [];
-      const mb = m.size_bytes ? `${(m.size_bytes / 1048576).toFixed(1)} MB` : '';
-      list.push({ id: m.id, title: m.title, type: m.kind, size: mb, url: m.url ?? undefined });
-      mediaBy.set(m.person_id, list);
-    });
-
-    const childrenBy = new Map<string, string[]>();
-    (ucRows ?? []).forEach(r => {
-      const list = childrenBy.get(r.union_id) ?? [];
-      list.push(r.child_id);
-      childrenBy.set(r.union_id, list);
-    });
-
-    const persons = (pRows ?? []).map(r =>
-      rowToPerson(r as PersonRow, archivesBy.get(r.id) ?? [], mediaBy.get(r.id) ?? []),
-    );
+    const persons = (pRows ?? []).map(r => rowToPerson(
+      r as PersonRow,
+      ((r.archive_records ?? []) as ArchiveRow[]).map(toArchive),
+      ((r.media_items ?? []) as MediaRow[]).map(toMedia),
+    ));
 
     // Children display in birth order.
     const dobOf = new Map(persons.map(p => [p.id, p.dob]));
     const unions: Union[] = (uRows ?? []).map(u => ({
       id: u.id, a: u.partner_a, b: u.partner_b, date: u.date, place: u.place,
-      children: (childrenBy.get(u.id) ?? []).sort((x, y) =>
+      children: ((u.union_children ?? []) as Array<{ child_id: string }>).map(c => c.child_id).sort((x, y) =>
         String(dobOf.get(x) ?? '').localeCompare(String(dobOf.get(y) ?? '')),
       ),
     }));
@@ -459,12 +463,15 @@ class SupabaseRepository implements Repository {
 
   async listMemberships(): Promise<Membership[]> {
     const sb = requireSupabase();
-    const { data: u } = await sb.auth.getUser();
-    if (!u.user) return [];
+    // getSession reads the stored session; getUser would make a round trip to
+    // the auth server just to learn the id. The database checks the token on
+    // the query itself, so nothing is trusted that wasn't before.
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return [];
     const { data, error } = await sb
       .from('memberships')
       .select('role, trees ( id, name, origin_place, origin_country, created_by )')
-      .eq('user_id', u.user.id)
+      .eq('user_id', session.user.id)
       .order('joined_at');
     if (error) throw error;
     return (data ?? []).flatMap(r => {
@@ -575,7 +582,7 @@ class SupabaseRepository implements Repository {
     if (file) {
       const path = `${treeId}/${personId}/${objectName(file.name)}`;
       const { error: ue } = await sb.storage.from('archives').upload(path, file, {
-        contentType: file.type || 'application/octet-stream',
+        contentType: file.type || 'application/octet-stream', cacheControl: IMMUTABLE,
       });
       if (ue) throw ue;
       filePath = `archives/${path}`;
@@ -612,7 +619,7 @@ class SupabaseRepository implements Repository {
     if (file) {
       uploaded = `${treeId}/${personId}/${objectName(file.name)}`;
       const { error: ue } = await sb.storage.from('archives').upload(uploaded, file, {
-        contentType: file.type || 'application/octet-stream',
+        contentType: file.type || 'application/octet-stream', cacheControl: IMMUTABLE,
       });
       if (ue) throw ue;
       filePath = `archives/${uploaded}`;
@@ -655,7 +662,7 @@ class SupabaseRepository implements Repository {
     // Same bucket as avatars, under a media/ subfolder. Tree id first, as the
     // storage policies require.
     const path = `${treeId}/${personId}/media/${crypto.randomUUID()}.jpg`;
-    const { error: ue } = await sb.storage.from('photos').upload(path, file, { contentType: 'image/jpeg' });
+    const { error: ue } = await sb.storage.from('photos').upload(path, file, { contentType: 'image/jpeg', cacheControl: IMMUTABLE });
     if (ue) throw ue;
 
     const stored = `photos/${path}`;
@@ -699,7 +706,7 @@ class SupabaseRepository implements Repository {
       // to decide membership.
       uploaded = `${treeId}/${personId}/${Date.now()}.jpg`;
       const { error: ue } = await sb.storage.from('photos').upload(uploaded, blob, {
-        contentType: 'image/jpeg', upsert: true,
+        contentType: 'image/jpeg', upsert: true, cacheControl: IMMUTABLE,
       });
       if (ue) throw ue;
       // The path, not a URL: the bucket is private, so URLs are signed on read.
@@ -725,10 +732,35 @@ class SupabaseRepository implements Repository {
     if (/^(https?:|data:|blob:)/.test(stored)) return stored;
     const slash = stored.indexOf('/');
     if (slash < 1) return null;
-    const { data, error } = await requireSupabase()
-      .storage.from(stored.slice(0, slash))
-      .createSignedUrl(stored.slice(slash + 1), 60 * 60);
-    return error ? null : data.signedUrl;
+    const bucket = stored.slice(0, slash);
+    const path = stored.slice(slash + 1);
+    // A tree full of photos asks for its URLs all in the same moment; collect
+    // them for a tick and sign each bucket's batch in one request.
+    let batch = this.signBatches.get(bucket);
+    if (!batch) {
+      const fresh = { paths: new Map<string, Array<(u: string | null) => void>>() };
+      this.signBatches.set(bucket, fresh);
+      setTimeout(() => void this.flushSignBatch(bucket, fresh.paths), 0);
+      batch = fresh;
+    }
+    const waiting = batch.paths.get(path) ?? [];
+    batch.paths.set(path, waiting);
+    return new Promise(resolve => waiting.push(resolve));
+  }
+
+  private signBatches = new Map<string, { paths: Map<string, Array<(u: string | null) => void>> }>();
+
+  private async flushSignBatch(bucket: string, paths: Map<string, Array<(u: string | null) => void>>) {
+    this.signBatches.delete(bucket);
+    const list = [...paths.keys()];
+    const urls = new Map<string, string>();
+    try {
+      const { data } = await requireSupabase().storage.from(bucket).createSignedUrls(list, 60 * 60);
+      (data ?? []).forEach(d => { if (d.path && d.signedUrl && !d.error) urls.set(d.path, d.signedUrl); });
+    } catch {
+      // Unsigned paths resolve to null below; the image simply doesn't show.
+    }
+    paths.forEach((resolvers, path) => resolvers.forEach(r => r(urls.get(path) ?? null)));
   }
 
   async listInvites(treeId: string): Promise<Invite[]> {
