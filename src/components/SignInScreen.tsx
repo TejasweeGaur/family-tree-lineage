@@ -2,6 +2,7 @@ import { useTreeStore } from '../store/useTreeStore';
 import { repo } from '../data/repository';
 import { TreePreview } from './TreePreview';
 import { AppFooter } from './AppFooter';
+import { APP_NAME, APP_TAGLINE } from '../config/app';
 
 /** Official four-colour Google mark, per their sign-in branding guidelines. */
 function GoogleMark() {
@@ -72,14 +73,20 @@ export function SignInScreen() {
 
         {/* ------------------------------------------------ overview */}
         <div style={{ minWidth: 0 }}>
-          <div style={{
-            width: 46, height: 46, borderRadius: 14, background: '#C2410C',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round">
-              <circle cx="12" cy="5" r="2.6" /><circle cx="5.5" cy="18.5" r="2.6" /><circle cx="18.5" cy="18.5" r="2.6" />
-              <path d="M12 7.6V12M5.5 15.9v-1.6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1.6" />
-            </svg>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 46, height: 46, borderRadius: 14, background: '#C2410C', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round">
+                <circle cx="12" cy="5" r="2.6" /><circle cx="5.5" cy="18.5" r="2.6" /><circle cx="18.5" cy="18.5" r="2.6" />
+                <path d="M12 7.6V12M5.5 15.9v-1.6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1.6" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>{APP_NAME}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#78716C' }}>{APP_TAGLINE}</div>
+            </div>
           </div>
 
           <h1 style={{

@@ -127,8 +127,10 @@ export function PersonCard({
         )}
       </div>
 
-      {/* Row 2 — avatar and identity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+      {/* Row 2 — avatar and identity. Top-aligned at a fixed height, so names,
+          dividers and places line up across a row of cards however many of
+          the optional lines (née, dates, occupation) each one has. */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginTop: 10, minHeight: 74 }}>
         <div style={{
           width: 58, height: 58, borderRadius: '50%', flexShrink: 0,
           background: photoSrc ? `#fff url(${photoSrc}) center/cover` : c.avFill,
@@ -151,7 +153,7 @@ export function PersonCard({
           </span>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, paddingTop: 4 }}>
           <div style={{ fontSize: 14.5, fontWeight: 800, letterSpacing: '-0.012em', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {fullName(person)}
           </div>

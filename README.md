@@ -1,4 +1,6 @@
-# Family Tree & Heritage Archive
+# Vanshavali · Family Tree & Lineage
+
+*Vanshavali* (वंशावली) is Hindi for a family's lineage record.
 
 A genealogy web app: an interactive family tree, per-person heritage profiles with document
 archives, a kinship explainer, a searchable directory, and PDF/Excel export.

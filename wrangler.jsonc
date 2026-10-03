@@ -2,7 +2,7 @@
 // assets. There is no Worker script — requests for static assets are free.
 {
   // Must match the project name in the Cloudflare dashboard.
-  "name": "family-tree-lineage",
+  "name": "vanshavali",
   "compatibility_date": "2026-09-01",
   "assets": {
     "directory": "./dist",

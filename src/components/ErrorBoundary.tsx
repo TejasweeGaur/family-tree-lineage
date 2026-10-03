@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { APP_VERSION, AUTHOR_EMAIL } from '../config/app';
+import { APP_NAME, APP_VERSION, AUTHOR_EMAIL } from '../config/app';
 
 interface State { error: Error | null; }
 
@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     if (!error) return this.props.children;
 
     const report = `Version ${APP_VERSION}\nPage: ${location.href}\n\n${error.name}: ${error.message}\n\n${(error.stack ?? '').slice(0, 1200)}`;
-    const mailto = `mailto:${AUTHOR_EMAIL}?subject=${encodeURIComponent('Family Tree: something went wrong')}&body=${encodeURIComponent(report)}`;
+    const mailto = `mailto:${AUTHOR_EMAIL}?subject=${encodeURIComponent(`${APP_NAME}: something went wrong`)}&body=${encodeURIComponent(report)}`;
 
     return (
       <div role="alert" style={{

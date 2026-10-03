@@ -1,5 +1,5 @@
 import { useTreeStore } from '../store/useTreeStore';
-import { APP_NAME, APP_VERSION, BUILD_DATE, AUTHOR_NAME, AUTHOR_EMAIL, SOURCE_URL } from '../config/app';
+import { APP_NAME, APP_TAGLINE, APP_VERSION, BUILD_DATE, AUTHOR_NAME, AUTHOR_EMAIL, SOURCE_URL } from '../config/app';
 
 const POINTS = [
   ['An interactive tree', 'Walk generations, expand and collapse branches, and trace a line back to where it starts.'],
@@ -32,7 +32,7 @@ export function AboutModal() {
     >
       <div
         role="dialog"
-        aria-label={`About ${APP_NAME}`}
+        aria-label={`About ${APP_NAME}, ${APP_TAGLINE}`}
         onClick={e => e.stopPropagation()}
         style={{
           width: 'min(520px, 96vw)', maxHeight: '92vh', overflowY: 'auto',
@@ -43,6 +43,7 @@ export function AboutModal() {
           <img src="/favicon.svg" alt="" width={48} height={48} style={{ borderRadius: 12, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.015em' }}>{APP_NAME}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: '#57534E', marginTop: 1 }}>{APP_TAGLINE}</div>
             <div style={{ fontSize: 12, color: '#78716C', marginTop: 2 }}>Version {APP_VERSION} · built {built}</div>
           </div>
           <button type="button" onClick={close} aria-label="Close" style={{
@@ -55,8 +56,10 @@ export function AboutModal() {
 
         <div style={{ padding: '16px 22px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <p style={{ margin: 0, fontSize: 13.5, color: '#44403C', lineHeight: 1.6 }}>
-            A private home for a family's history — the tree, the stories, and the papers that prove
-            them — built to be handed down rather than lost in a folder somewhere.
+            <em>Vanshavali</em> (वंशावली) is Hindi for a family's lineage record, the kind
+            elders once kept by hand. This is that record for today: a private home for a
+            family's history — the tree, the stories, and the papers that prove them — built
+            to be handed down rather than lost in a folder somewhere.
           </p>
 
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 9 }}>
