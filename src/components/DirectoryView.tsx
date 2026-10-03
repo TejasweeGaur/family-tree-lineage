@@ -11,7 +11,7 @@ export function DirectoryView() {
   const q = filters.q.trim().toLowerCase();
 
   let rows = persons.filter(p => {
-    if (q) return `${p.first} ${p.last} ${p.maiden}`.toLowerCase().includes(q);
+    if (q) return `${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(q);
     if (filters.gender !== 'All') return p.gender === filters.gender;
     return true;
   });
@@ -70,7 +70,6 @@ export function DirectoryView() {
                 </span>
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fullName(p)}</span>
-                  {p.maiden && <span style={{ display: 'block', fontSize: 11, color: '#8A817A', fontStyle: 'italic' }}>née {p.maiden}</span>}
                 </span>
               </div>
 

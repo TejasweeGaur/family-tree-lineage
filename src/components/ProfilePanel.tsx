@@ -278,9 +278,6 @@ function HeroSection({ person }: { person: Person; data: Data }) {
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.022em', marginTop: 8, lineHeight: 1.15 }}>
             {fullName(person)}
           </div>
-          {person.maiden && (
-            <div style={{ fontSize: 13, fontStyle: 'italic', color: '#8A817A', marginTop: 1 }}>née {person.maiden}</div>
-          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 10 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: '#57534E' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">

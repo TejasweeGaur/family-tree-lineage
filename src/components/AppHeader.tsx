@@ -47,7 +47,7 @@ export function AppHeader() {
   const results = q.length > 1
     ? persons.flatMap(p => {
         const out: Array<{ id: string; title: string; sub: string; tag: string }> = [];
-        if (`${p.first} ${p.last} ${p.maiden}`.toLowerCase().includes(q)) {
+        if (`${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(q)) {
           out.push({ id: p.id, title: fullName(p), sub: `${p.label} · ${year(p.dob)}`, tag: 'PERSON' });
         } else if (`${p.pob} ${p.residency}`.toLowerCase().includes(q)) {
           out.push({ id: p.id, title: fullName(p), sub: p.residency || p.pob, tag: 'PLACE' });

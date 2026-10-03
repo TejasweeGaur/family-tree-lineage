@@ -28,7 +28,7 @@ export interface Person {
   id: string;
   first: string;
   last: string;
-  maiden: string;
+  middle: string;
   gender: Gender;
   dob: string;
   pob: string;
@@ -188,7 +188,7 @@ export type FormGroup = 'child' | 'spouse' | 'parent' | 'sibling' | 'root';
 export interface FormValues {
   first: string;
   last: string;
-  maiden: string;
+  middle: string;
   gender: Gender;
   living: boolean;
   dob: string;

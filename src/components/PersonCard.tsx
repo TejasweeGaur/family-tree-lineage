@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { palette } from '../utils/palette';
 import { lifeDates } from '../utils/dates';
-import { initials, fullName } from '../utils/kinship';
+import { initials, fullName, cardName } from '../utils/kinship';
 import { useTreeStore } from '../store/useTreeStore';
 import { useSignedUrl } from '../hooks/useSignedUrl';
 import type { Person } from '../types';
@@ -127,10 +127,10 @@ export function PersonCard({
         )}
       </div>
 
-      {/* Row 2 — avatar and identity. Top-aligned at a fixed height, so names,
-          dividers and places line up across a row of cards however many of
-          the optional lines (née, dates, occupation) each one has. */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginTop: 10, minHeight: 74 }}>
+      {/* Row 2 — avatar and identity. Top-aligned, and never taller than the
+          avatar, so names and the rows below line up across a row of cards
+          whether or not each card has dates and an occupation. */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginTop: 10 }}>
         <div style={{
           width: 58, height: 58, borderRadius: '50%', flexShrink: 0,
           background: photoSrc ? `#fff url(${photoSrc}) center/cover` : c.avFill,
@@ -154,14 +154,9 @@ export function PersonCard({
         </div>
 
         <div style={{ flex: 1, minWidth: 0, paddingTop: 4 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 800, letterSpacing: '-0.012em', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {fullName(person)}
+          <div style={{ fontSize: 14.5, fontWeight: 800, letterSpacing: '-0.012em', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fullName(person)}>
+            {cardName(person)}
           </div>
-          {person.maiden && (
-            <div style={{ fontSize: 11.5, fontStyle: 'italic', color: '#6B635C', lineHeight: 1.35 }}>
-              (née {person.maiden})
-            </div>
-          )}
           <div style={{ fontSize: 12, fontWeight: 700, color: c.accent, marginTop: 2 }}>
             {lifeDates(person.dob, person.dod)}
           </div>

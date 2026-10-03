@@ -10,7 +10,7 @@ interface TreeData { persons: Person[]; unions: Union[]; }
  * assumption about the parents' genders.
  */
 export const CSV_COLUMNS = [
-  'ref', 'first_name', 'last_name', 'maiden_name', 'gender',
+  'ref', 'first_name', 'middle_name', 'last_name', 'gender',
   'birth_date', 'birth_place', 'death_date', 'death_place',
   'occupation', 'residency', 'gotra', 'shasan', 'label', 'bio',
   'parent1_ref', 'parent2_ref', 'spouse_refs', 'marriage_dates', 'marriage_places',
@@ -87,7 +87,7 @@ export function exportPeopleCsv(data: TreeData): string {
       .sort((x, y) => byRank(other(x), other(y)));
     const record: Record<Col, string> = {
       ref: ref.get(p.id)!,
-      first_name: p.first, last_name: p.last, maiden_name: p.maiden, gender: p.gender,
+      first_name: p.first, middle_name: p.middle, last_name: p.last, gender: p.gender,
       birth_date: p.dob, birth_place: p.pob, death_date: p.dod, death_place: p.pod,
       occupation: p.occupation, residency: p.residency, gotra: p.gotra, shasan: p.shasan,
       label: p.label, bio: p.bio,
@@ -108,8 +108,8 @@ export function templateCsv(): string {
   const blank = (over: Partial<Record<Col, string>>) => CSV_COLUMNS.map(c => over[c] ?? '');
   return toCsv([
     [...CSV_COLUMNS],
-    blank({ ref: 'P1', first_name: 'Example', last_name: 'Ancestor', gender: 'Male', birth_date: '1920', birth_place: 'Varanasi', death_date: '1990', label: 'Patriarch', spouse_refs: 'P2', marriage_dates: '1945-05-12', marriage_places: 'Varanasi' }),
-    blank({ ref: 'P2', first_name: 'Example', last_name: 'Ancestor', maiden_name: 'Joshi', gender: 'Female', birth_date: '1925', label: 'Matriarch', spouse_refs: 'P1' }),
+    blank({ ref: 'P1', first_name: 'Example', middle_name: 'Kumar', last_name: 'Ancestor', gender: 'Male', birth_date: '1920', birth_place: 'Varanasi', death_date: '1990', label: 'Patriarch', spouse_refs: 'P2', marriage_dates: '1945-05-12', marriage_places: 'Varanasi' }),
+    blank({ ref: 'P2', first_name: 'Example', last_name: 'Ancestor', gender: 'Female', birth_date: '1925', label: 'Matriarch', spouse_refs: 'P1' }),
     blank({ ref: 'P3', first_name: 'Example', last_name: 'Child', gender: 'Other', birth_date: '1950-03-01', parent1_ref: 'P1', parent2_ref: 'P2' }),
   ]);
 }
@@ -118,7 +118,7 @@ export function templateCsv(): string {
 
 export interface ImportPerson {
   ref: string;
-  first: string; last: string; maiden: string; gender: Gender;
+  first: string; last: string; middle: string; gender: Gender;
   dob: string; pob: string; dod: string; pod: string;
   occupation: string; residency: string; gotra: string; shasan: string;
   label: string; bio: string;
@@ -172,6 +172,9 @@ export function planImport(text: string): ImportPlan {
   if (errors.length) return empty;
 
   const get = (r: string[], c: Col) => (idx[c] >= 0 ? (r[idx[c]] ?? '').trim() : '');
+  // Files exported before the rename have "maiden_name" where the middle name now goes.
+  const legacyIdx = header.indexOf('maiden_name');
+  const legacyMiddle = (r: string[]) => (legacyIdx >= 0 ? (r[legacyIdx] ?? '').trim() : '');
   const list = (v: string) => v.split(';').map(s => s.trim());
 
   const people: ImportPerson[] = [];
@@ -191,7 +194,7 @@ export function planImport(text: string): ImportPlan {
     if (!gender) errors.push(`Row ${line} (${ref}): gender "${get(r, 'gender')}" isn't Male, Female or Other.`);
 
     people.push({
-      ref, first, last, maiden: get(r, 'maiden_name'), gender: gender ?? 'Other',
+      ref, first, last, middle: get(r, 'middle_name') || legacyMiddle(r), gender: gender ?? 'Other',
       dob: get(r, 'birth_date'), pob: get(r, 'birth_place'),
       dod: get(r, 'death_date'), pod: get(r, 'death_place'),
       occupation: get(r, 'occupation'), residency: get(r, 'residency'),

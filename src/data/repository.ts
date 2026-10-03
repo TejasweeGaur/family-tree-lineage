@@ -276,7 +276,8 @@ type PersonRow = {
 
 function rowToPerson(r: PersonRow, archives: Archive[], media: MediaItem[]): Person {
   return {
-    id: r.id, first: r.first, last: r.last, maiden: r.maiden, gender: r.gender,
+    // The column is still named "maiden" from before it became the middle name.
+    id: r.id, first: r.first, last: r.last, middle: r.maiden, gender: r.gender,
     dob: r.dob, pob: r.pob, dod: r.dod, pod: r.pod,
     occupation: r.occupation, residency: r.residency,
     gotra: r.gotra, shasan: r.shasan, label: r.label, bio: r.bio,
@@ -290,7 +291,7 @@ function rowToPerson(r: PersonRow, archives: Archive[], media: MediaItem[]): Per
 function personToRow(p: Person, treeId?: string) {
   return {
     ...(treeId ? { tree_id: treeId } : {}),
-    first: p.first, last: p.last, maiden: p.maiden, gender: p.gender,
+    first: p.first, last: p.last, maiden: p.middle, gender: p.gender,
     dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
     occupation: p.occupation, residency: p.residency,
     gotra: p.gotra, shasan: p.shasan, label: p.label, bio: p.bio,
@@ -834,7 +835,8 @@ class SupabaseRepository implements Repository {
   async importPeople(treeId: string, plan: ImportPlan): Promise<void> {
     const { error } = await requireSupabase().rpc('import_people', {
       p_tree: treeId,
-      p_people: plan.people,
+      // import_people reads the middle name from the "maiden" key, after the column.
+      p_people: plan.people.map(({ middle, ...p }) => ({ ...p, maiden: middle })),
       p_unions: plan.unions,
       p_root: plan.rootRef,
     });

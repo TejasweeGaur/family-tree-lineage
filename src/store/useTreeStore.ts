@@ -171,7 +171,7 @@ function kindLabel(group: string, gender: Gender): string {
 
 function emptyValues(): FormValues {
   return {
-    first: '', last: '', maiden: '', gender: 'Other', living: true,
+    first: '', last: '', middle: '', gender: 'Other', living: true,
     dob: '', pob: '', dod: '', pod: '',
     occupation: '', residency: '', gotra: '', shasan: '',
     label: '', bio: '', mdate: '', mplace: '', photo: '',
@@ -557,7 +557,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       const q = String(val).trim().toLowerCase();
       if (!q) return;
       const { persons, unions } = get();
-      const match = persons.find(p => `${p.first} ${p.last} ${p.maiden}`.toLowerCase().includes(q));
+      const match = persons.find(p => `${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(q));
       if (!match) return;
       // Open every union on the path from the root down to the match.
       const next = { ...get().collapsed };
@@ -659,7 +659,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       form: {
         mode: 'edit', targetId: id, group: 'root', bioTab: 'write',
         values: {
-          first: p.first, last: p.last, maiden: p.maiden, gender: p.gender,
+          first: p.first, last: p.last, middle: p.middle, gender: p.gender,
           living: !p.dod, dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
           occupation: p.occupation, residency: p.residency,
           gotra: p.gotra, shasan: p.shasan,
@@ -709,7 +709,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       const newPersons = persons.map(p => p.id === form.targetId
         ? {
             ...p,
-            first: v.first, last: v.last, maiden: v.maiden, gender: v.gender,
+            first: v.first, last: v.last, middle: v.middle, gender: v.gender,
             dob: v.dob, pob: v.pob,
             dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
             occupation: v.occupation, residency: v.residency,
@@ -745,7 +745,7 @@ export const useTreeStore = create<Store>((set, get) => ({
 
     const cid = nid();
     const draft: Person = {
-      id: cid, first: v.first, last: v.last, maiden: v.maiden, gender: v.gender,
+      id: cid, first: v.first, last: v.last, middle: v.middle, gender: v.gender,
       dob: v.dob, pob: v.pob, dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
       occupation: v.occupation, residency: v.residency,
       gotra: v.gotra, shasan: v.shasan,
@@ -1464,7 +1464,7 @@ export const useTreeStore = create<Store>((set, get) => ({
 
     persons.forEach(p => {
       let ok = true;
-      if (needle) ok = `${p.first} ${p.last} ${p.maiden}`.toLowerCase().includes(needle);
+      if (needle) ok = `${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(needle);
       if (ok && gender !== 'All') ok = p.gender === gender;
       if (ok && status === 'Living') ok = !p.dod;
       if (ok && status === 'Deceased') ok = !!p.dod;

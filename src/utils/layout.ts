@@ -13,6 +13,8 @@ interface WidthInfo {
   w: number;
   unitW: number;
   kidW: number;
+  /** Distance from the left edge of the children's row to the point that sits under the parents. */
+  kidAnchor: number;
   members: string[];
   kids: string[];
 }
@@ -53,11 +55,24 @@ export function computeLayout(
     const m = unitMembers(id);
     const unitW = m.length * CW + (m.length - 1) * GAP;
     const kids = kidsOf(id);
-    let kidW = 0;
-    kids.forEach((k, i) => { kidW += measure(k) + (i ? SIB : 0); });
-    if (admin && kids.length) kidW += SIB + 170;
+    // Where each child's own card sits in the row (a child's spouse sits to
+    // its right, so a card isn't always the middle of its branch).
+    let kidSpan = 0;
+    const centres: number[] = [];
+    kids.forEach((k, i) => {
+      if (i) kidSpan += SIB;
+      const kw = measure(k);
+      centres.push(kidSpan + (kw - W[k].unitW) / 2 + CW / 2);
+      kidSpan += kw;
+    });
+    // The parents sit over the midpoint of the first and last child's cards,
+    // so the connectors fan out evenly. The Add Child slot hangs off the right
+    // end; the row is as wide as the further side from that midpoint, twice.
+    const kidAnchor = kids.length ? (centres[0] + centres[centres.length - 1]) / 2 : 0;
+    const addW = admin && kids.length ? SIB + 170 : 0;
+    const kidW = kids.length ? 2 * Math.max(kidAnchor, kidSpan - kidAnchor + addW) : 0;
     const w = Math.max(unitW, kidW);
-    W[id] = { w, unitW, kidW, members: m, kids };
+    W[id] = { w, unitW, kidW, kidAnchor, members: m, kids };
     return w;
   };
 
@@ -119,7 +134,7 @@ export function computeLayout(
 
     const kids = d.kids;
     if (kids.length) {
-      let kx = left + (d.w - d.kidW) / 2;
+      let kx = left + d.w / 2 - d.kidAnchor;
       const childTop = top + CH + VG;
       const busY = top + CH + 118;
       const placed: number[] = [];
@@ -230,7 +245,6 @@ export function buildNodeProps(
     display: visible ? 'flex' : 'none',
     initials: initials(p),
     name: fullName(p),
-    maidenText: p.maiden ? `(née ${p.maiden})` : '',
     dates: lifeDates(p.dob, p.dod),
     occupation: p.occupation || '—',
     label: p.label,

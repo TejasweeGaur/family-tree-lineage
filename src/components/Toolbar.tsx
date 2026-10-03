@@ -28,7 +28,7 @@ export function Toolbar() {
 
   const matchCount = filterActive
     ? persons.filter(p => {
-        if (q && !`${p.first} ${p.last} ${p.maiden}`.toLowerCase().includes(q.trim().toLowerCase())) return false;
+        if (q && !`${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(q.trim().toLowerCase())) return false;
         if (gender !== 'All' && p.gender !== gender) return false;
         if (status === 'Living' && p.dod) return false;
         if (status === 'Deceased' && !p.dod) return false;

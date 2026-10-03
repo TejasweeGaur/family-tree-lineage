@@ -9,7 +9,7 @@ import type { Person, Union, Gender } from '../types';
 // Postgres and never in this file.
 //
 // The roster is shaped to exercise every feature: four generations, a living
-// and a deceased spouse, maiden names, married-in people with origin families
+// and a deceased spouse, middle names, married-in people with origin families
 // that stay off the canvas, inherited gotra/shasan, markdown biographies,
 // attached archives and media, and unions with and without a recorded date.
 // ---------------------------------------------------------------------------
@@ -29,11 +29,11 @@ export const ARCHIVE_CATEGORIES = [
 function P(
   id: string, first: string, last: string, gender: Gender,
   dob: string, pob: string, dod: string, pod: string,
-  occupation: string, residency: string, label: string, maiden = '',
+  occupation: string, residency: string, label: string, middle = '',
 ): Person {
   return {
     id, first, last, gender, dob, pob, dod, pod,
-    occupation, residency, label, maiden,
+    occupation, residency, label, middle,
     gotra: '', shasan: '',
     bio: '', archives: [], media: [],
     sample: first === 'Child' || first === 'Spouse' || first === 'Parent',

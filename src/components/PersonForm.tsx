@@ -155,7 +155,7 @@ export function PersonForm() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
               <Field label="First name *" value={v.first} onChange={val => store.setFormValue('first', val)} placeholder="Given name" />
               <Field label="Last / Family name *" value={v.last} onChange={val => store.setFormValue('last', val)} placeholder="Family name" />
-              <Field label="Maiden / Birth name" value={v.maiden} onChange={val => store.setFormValue('maiden', val)} placeholder="If different at birth" />
+              <Field label="Middle name" value={v.middle} onChange={val => store.setFormValue('middle', val)} placeholder="e.g. Kumar" />
             </div>
           </div>
 

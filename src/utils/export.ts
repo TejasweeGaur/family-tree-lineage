@@ -7,7 +7,7 @@ import { lifeDates } from './dates';
 interface TreeData { persons: Person[]; unions: Union[]; }
 
 interface Row {
-  name: string; maiden: string; gender: string; relation: string;
+  name: string; gender: string; relation: string;
   dob: string; pob: string; dod: string; pod: string;
   occupation: string; residency: string;
   father: string; mother: string; spouses: string; children: string;
@@ -30,7 +30,6 @@ export function exportRows(data: TreeData): Row[] {
 
       return {
         name: fullName(p),
-        maiden: p.maiden,
         gender: p.gender,
         relation: p.label,
         dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
@@ -46,7 +45,6 @@ export function exportRows(data: TreeData): Row[] {
 
 const XLSX_COLUMNS: Array<{ header: string; key: keyof Row; width: number }> = [
   { header: 'Name', key: 'name', width: 26 },
-  { header: 'Maiden name', key: 'maiden', width: 16 },
   { header: 'Gender', key: 'gender', width: 10 },
   { header: 'Relation', key: 'relation', width: 22 },
   { header: 'Date of birth', key: 'dob', width: 14 },

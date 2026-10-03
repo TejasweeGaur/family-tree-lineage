@@ -208,5 +208,16 @@ export function initials(p: Person): string {
 }
 
 export function fullName(p: Person): string {
-  return `${p.first} ${p.last}`;
+  return [p.first, p.middle, p.last].filter(Boolean).join(' ');
+}
+
+/**
+ * The name as it fits on a tree card: "Ashok Kumar Gaur", or "Ashok K. Gaur"
+ * when the full name would be cut off at the card's width.
+ */
+export function cardName(p: Person): string {
+  const full = fullName(p);
+  if (full.length <= 20 || !p.middle) return full;
+  const middle = p.middle.split(/\s+/).map(w => `${w[0]}.`).join(' ');
+  return [p.first, middle, p.last].filter(Boolean).join(' ');
 }
