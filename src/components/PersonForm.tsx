@@ -1,5 +1,8 @@
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
+import { DateField } from './DateField';
+import { RefSelect } from './RefSelect';
+import { EducationEditor } from './EducationEditor';
 import { renderMarkdown } from '../utils/markdown';
 import { readSquarePhoto } from '../utils/image';
 import { useSignedUrl } from '../hooks/useSignedUrl';
@@ -14,9 +17,18 @@ export function PersonForm() {
   const store = useTreeStore();
   const { form, persons, savingForm } = store;
   const fileRef = useRef<HTMLInputElement>(null);
-  // Hooks must run unconditionally, so this sits above the early return.
+  // Hooks must run unconditionally, so these sit above the early return.
   const photoSrc = useSignedUrl(form?.values.photo || undefined);
+  // Date fields whose text isn't a date yet; saving waits until there are none.
+  const [badDates, setBadDates] = useState<Record<string, boolean>>({});
+  const validity = useCallback((key: string) => (ok: boolean) =>
+    setBadDates(b => (!!b[key] === !ok ? b : { ...b, [key]: !ok })), []);
+  const dobValidity = useCallback((ok: boolean) => validity('dob')(ok), [validity]);
+  const dodValidity = useCallback((ok: boolean) => validity('dod')(ok), [validity]);
+  const mdateValidity = useCallback((ok: boolean) => validity('mdate')(ok), [validity]);
   if (!form) return null;
+  const datesOk = !Object.values(badDates).some(Boolean);
+  const canSave = !!(form.values.first && form.values.last && datesOk && !savingForm);
 
   const pickPhoto = async (file: File | undefined) => {
     if (!file) return;
@@ -171,10 +183,10 @@ export function PersonForm() {
               </button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
-              <Field label="Date of Birth" value={v.dob} onChange={val => store.setFormValue('dob', val)} placeholder="YYYY-MM-DD or year" />
+              <DateField label="Date of Birth" value={v.dob} onChange={val => store.setFormValue('dob', val)} onValidity={dobValidity} noFuture />
               <Field label="Place of Birth" value={v.pob} onChange={val => store.setFormValue('pob', val)} placeholder="City, region" />
               {showDeath && <>
-                <Field label="Date of Death" value={v.dod} onChange={val => store.setFormValue('dod', val)} placeholder="YYYY-MM-DD or year" />
+                <DateField label="Date of Death" value={v.dod} onChange={val => store.setFormValue('dod', val)} onValidity={dodValidity} noFuture />
                 <Field label="Place of Death" value={v.pod} onChange={val => store.setFormValue('pod', val)} placeholder="City, region" />
               </>}
             </div>
@@ -187,7 +199,7 @@ export function PersonForm() {
                 {isEdit ? 'MARRIAGE DETAILS' : 'MARRIAGE / ANNIVERSARY'}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
-                <Field label="Marriage / Anniversary Date" value={v.mdate} onChange={val => store.setFormValue('mdate', val)} placeholder="YYYY-MM-DD or year" amber />
+                <DateField label="Marriage / Anniversary Date" value={v.mdate} onChange={val => store.setFormValue('mdate', val)} onValidity={mdateValidity} amber />
                 <Field label="Place of Marriage" value={v.mplace} onChange={val => store.setFormValue('mplace', val)} placeholder="City, region" amber />
               </div>
               <div style={{ fontSize: 11, color: '#92400E', marginTop: 9 }}>Stored once on the marriage record, so both spouses stay in sync.</div>
@@ -200,9 +212,20 @@ export function PersonForm() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
               <Field label="Occupation / Profession" value={v.occupation} onChange={val => store.setFormValue('occupation', val)} placeholder="e.g. Classical Scholar" />
               <Field label="Residency / Heritage City" value={v.residency} onChange={val => store.setFormValue('residency', val)} placeholder="e.g. Varanasi" />
-              <Field label="Gotra" value={v.gotra} onChange={val => store.setFormValue('gotra', val)} placeholder="e.g. Bharadwaj" />
-              <Field label="Shasan" value={v.shasan} onChange={val => store.setFormValue('shasan', val)} placeholder="e.g. Vaishnav" />
+              <RefSelect label="Gotra" value={v.gotra} options={store.refOptions('GOTRA')} onChange={val => store.setFormValue('gotra', val)} addNoun="Gotra" />
+              <RefSelect label="Shasan" value={v.shasan} options={store.refOptions('SHASAN')} onChange={val => store.setFormValue('shasan', val)} addNoun="Shasan" />
             </div>
+          </div>
+
+          {/* Education — optional, any number of rows */}
+          <div>
+            <div style={sectionLabel}>EDUCATION <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none' }}>(optional)</span></div>
+            <EducationEditor
+              rows={v.education}
+              levels={store.refOptions('EDUCATION_LEVEL')}
+              onChange={rows => store.setFormValue('education', rows)}
+              stacked={store.winW < 640}
+            />
           </div>
 
           {/* Relationship label */}
@@ -276,10 +299,11 @@ export function PersonForm() {
         {/* Footer */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 22px', borderTop: '1px solid #EFE9E2', background: '#FFFDFB' }}>
           <button type="button" onClick={store.closeForm} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#78716C' }}>Cancel</button>
-          <button type="button" onClick={() => void store.saveForm()} disabled={!v.first || !v.last || savingForm} style={{
+          {!datesOk && <span style={{ marginRight: 'auto', fontSize: 12, fontWeight: 600, color: '#DC2626' }}>Fix the date marked in red to save.</span>}
+          <button type="button" onClick={() => void store.saveForm()} disabled={!canSave} style={{
             padding: '10px 20px', borderRadius: 10, border: 'none',
-            background: v.first && v.last && !savingForm ? '#1C1917' : '#A8A29E',
-            color: '#fff', cursor: v.first && v.last && !savingForm ? 'pointer' : 'not-allowed',
+            background: canSave ? '#1C1917' : '#A8A29E',
+            color: '#fff', cursor: canSave ? 'pointer' : 'not-allowed',
             fontSize: 12.5, fontWeight: 700,
           }}>
             {savingForm ? 'Saving…' : isEdit ? 'Save Changes' : 'Add to Tree'}

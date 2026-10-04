@@ -3,13 +3,14 @@ import { spousesOf, parentsOf, unionsOf, fullName, initials } from './kinship';
 import { computeLayout } from './layout';
 import { palette } from './palette';
 import { lifeDates } from './dates';
+import { treeTitle } from './treeTitle';
 
 interface TreeData { persons: Person[]; unions: Union[]; }
 
 interface Row {
   name: string; gender: string; relation: string;
   dob: string; pob: string; dod: string; pod: string;
-  occupation: string; residency: string;
+  occupation: string; residency: string; gotra: string; shasan: string; education: string;
   father: string; mother: string; spouses: string; children: string;
 }
 
@@ -34,6 +35,11 @@ export function exportRows(data: TreeData): Row[] {
         relation: p.label,
         dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
         occupation: p.occupation, residency: p.residency,
+        gotra: p.gotra, shasan: p.shasan,
+        // "Graduate, Computer Science, Delhi University (2010); …"
+        education: p.education
+          .map(e => [e.level, e.branch, e.institution].filter(Boolean).join(', ') + (e.year ? ` (${e.year})` : ''))
+          .join('; '),
         // Fall back to origin-family text for married-in people with no in-tree parents.
         father: father ? fullName(father) : p.originFather,
         mother: mother ? fullName(mother) : p.originMother,
@@ -53,6 +59,9 @@ const XLSX_COLUMNS: Array<{ header: string; key: keyof Row; width: number }> = [
   { header: 'Place of death', key: 'pod', width: 16 },
   { header: 'Occupation', key: 'occupation', width: 28 },
   { header: 'Residency', key: 'residency', width: 16 },
+  { header: 'Gotra', key: 'gotra', width: 14 },
+  { header: 'Shasan', key: 'shasan', width: 14 },
+  { header: 'Education', key: 'education', width: 40 },
   { header: 'Father', key: 'father', width: 22 },
   { header: 'Mother', key: 'mother', width: 22 },
   { header: 'Spouse(s)', key: 'spouses', width: 26 },
@@ -178,7 +187,7 @@ export function exportPdf(data: TreeData, treeName: string): boolean {
     : `<p class="empty">This archive has no members yet.</p>`;
 
   const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>${esc(treeName)} Family Tree</title>
+<html><head><meta charset="utf-8"><title>${esc(treeTitle(treeName))}</title>
 <style>
   @page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; }
   * { box-sizing: border-box; }
@@ -191,7 +200,7 @@ export function exportPdf(data: TreeData, treeName: string): boolean {
   svg { display: block; width: 100%; height: auto; max-height: ${landscape ? '172mm' : '250mm'}; }
 </style></head>
 <body>
-  <h1>${esc(treeName)} Family Tree</h1>
+  <h1>${esc(treeTitle(treeName))}</h1>
   <div class="sub">${data.persons.length} individuals · exported ${esc(today)}</div>
   ${body}
 </body></html>`;

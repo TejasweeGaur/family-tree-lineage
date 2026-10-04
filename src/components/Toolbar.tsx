@@ -44,14 +44,28 @@ export function Toolbar() {
   const allOpen = withKids.every(u => !collapsed[u.id]);
   const allShut = withKids.filter(u => !collapsed[u.id]).length <= 1;
 
+  const genderSelect = (
+    <select
+      value={gender}
+      onChange={e => setFilter('gender', e.target.value)}
+      aria-label="Gender"
+      style={{ padding: '8px 11px', borderRadius: 9, border: '1px solid #E7E2DC', background: '#FAF8F5', fontSize: 12.5, fontWeight: 600, color: '#44403C', outline: 'none', fontFamily: 'inherit', width: isMobile ? '100%' : undefined }}
+    >
+      <option value="All">All genders</option>
+      <option value="Male">Male</option>
+      <option value="Female">Female</option>
+      <option value="Other">Other</option>
+    </select>
+  );
+
   return (
     <div style={{
-      flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10,
-      padding: `11px ${isMobile ? 12 : 20}px`,
+      flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: isMobile ? 8 : 10,
+      padding: isMobile ? '8px 12px' : '11px 20px',
       background: '#FFFDFB', borderBottom: '1px solid #E7E2DC',
       position: 'relative', zIndex: 30,
     }}>
-      <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: 300 }}>
+      <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: isMobile ? undefined : 300, minWidth: 0 }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A8A29E" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 12, top: 10 }}>
           <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.4-3.4" />
         </svg>
@@ -64,19 +78,11 @@ export function Toolbar() {
         />
       </div>
 
-      <select
-        value={gender}
-        onChange={e => setFilter('gender', e.target.value)}
-        style={{ padding: '8px 11px', borderRadius: 9, border: '1px solid #E7E2DC', background: '#FAF8F5', fontSize: 12.5, fontWeight: 600, color: '#44403C', outline: 'none', fontFamily: 'inherit' }}
-      >
-        <option value="All">All genders</option>
-        <option value="Male">Male</option>
-        <option value="Female">Female</option>
-        <option value="Other">Other</option>
-      </select>
+      {/* On phones the gender filter moves into the Filters panel. */}
+      {!isMobile && genderSelect}
 
       <div style={{ position: 'relative' }}>
-        <button type="button" onClick={toggleFilters} style={{
+        <button type="button" onClick={toggleFilters} aria-label={filterActive ? `Filters: ${matchCount} matches` : "Filters"} style={{
           display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9,
           cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
           background: filterActive ? '#FEF3C7' : '#FAF8F5',
@@ -84,16 +90,22 @@ export function Toolbar() {
           color: '#44403C',
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z" /></svg>
-          Filters {filterActive && '•'}
+          {isMobile ? (filterActive ? `${matchCount}` : '') : <>Filters {filterActive && '•'}</>}
         </button>
 
         {showFilters && (
           <div style={{
-            position: 'absolute', top: 42, left: 0,
+            position: 'absolute', top: 42, ...(isMobile ? { right: 0 } : { left: 0 }),
             width: 300, maxWidth: 'calc(100vw - 28px)',
             background: '#fff', border: '1px solid #E7E2DC', borderRadius: 16,
             boxShadow: '0 18px 44px rgba(28,25,23,.14)', padding: 15, zIndex: 60,
           }}>
+            {isMobile && (
+              <>
+                <div style={eyebrow}>GENDER</div>
+                <div style={{ marginBottom: 14 }}>{genderSelect}</div>
+              </>
+            )}
             <div style={eyebrow}>BIRTH YEAR</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
               {ERAS.map(e => {
@@ -135,7 +147,8 @@ export function Toolbar() {
         )}
       </div>
 
-      {view === 'tree' && (
+      {/* On phones these live in the header. */}
+      {view === 'tree' && !isMobile && (
         <div style={{ display: 'flex', background: '#F5F1EC', borderRadius: 9, padding: 2, gap: 2 }}>
           <button type="button" onClick={expandAll} style={segBtn(allOpen)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><path d="M7 15l5 5 5-5M7 9l5-5 5 5" /></svg>
@@ -148,7 +161,7 @@ export function Toolbar() {
         </div>
       )}
 
-      {filterActive && (
+      {filterActive && !isMobile && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px 7px 13px', borderRadius: 99, background: '#FEF3C7', border: '1px solid #FCD34D' }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#92400E', whiteSpace: 'nowrap' }}>
             {matchCount} {matchCount === 1 ? 'match' : 'matches'}
@@ -159,9 +172,17 @@ export function Toolbar() {
         </div>
       )}
 
-      <div style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#78716C', whiteSpace: 'nowrap' }}>
-        Total: {persons.length} individuals
-      </div>
+      {isMobile ? (
+        filterActive && (
+          <button type="button" onClick={clearFilters} style={{ flexShrink: 0, padding: '8px 11px', borderRadius: 9, border: 'none', background: '#92400E', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Clear
+          </button>
+        )
+      ) : (
+        <div style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#78716C', whiteSpace: 'nowrap' }}>
+          Total: {persons.length} individuals
+        </div>
+      )}
     </div>
   );
 }

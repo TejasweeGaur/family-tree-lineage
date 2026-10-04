@@ -553,6 +553,9 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
   person.archives.forEach(a => {
     if (a.year) timelineItems.push({ date: a.year, dot: '#F59E0B', title: a.title, sub: a.category + (a.origin ? ` · ${a.origin}` : '') });
   });
+  person.education.forEach(e => {
+    if (e.year) timelineItems.push({ date: e.year, dot: '#16A34A', title: `Completed ${[e.level, e.branch].filter(Boolean).join(', ') || 'education'}`, sub: e.institution });
+  });
   if (person.dod) timelineItems.push({ date: person.dod, dot: '#1C1917', title: 'Passed away', sub: fmtDate(person.dod) + (person.pod ? ` · ${person.pod}` : '') });
   timelineItems.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
@@ -642,6 +645,26 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
           </div>
         ))}
       </div>
+
+      {/* Education */}
+      {person.education.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E', marginBottom: 10 }}>EDUCATION</div>
+          <div style={{ border: '1px solid #E7E2DC', borderRadius: 13, background: '#fff', overflow: 'hidden' }}>
+            {person.education.map((e, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '11px 14px', borderTop: i ? '1px solid #F3EFEA' : 'none' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#292524' }}>
+                    {[e.level, e.branch].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                  {e.institution && <div style={{ fontSize: 12, color: '#78716C', marginTop: 2 }}>{e.institution}</div>}
+                </div>
+                {e.year && <div style={{ flexShrink: 0, fontSize: 12, fontWeight: 800, color: '#A8A29E' }}>{e.year}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Timeline */}
       <div>

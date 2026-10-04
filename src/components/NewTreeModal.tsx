@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { COUNTRY_HINTS } from '../data/countries';
+import { treeTitle } from '../utils/treeTitle';
 
 export function NewTreeModal() {
   const store = useTreeStore();
@@ -50,7 +51,7 @@ export function NewTreeModal() {
           </div>
           {name && (
             <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF6F1', border: '1px solid #FED7AA', fontSize: 12.5, fontWeight: 600, color: '#C2410C' }}>
-              Your tree will be called: <strong>{name} Family Tree</strong>
+              Your tree will be called: <strong>{treeTitle(name)}</strong>
             </div>
           )}
         </div>

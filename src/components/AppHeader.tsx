@@ -1,11 +1,11 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { eventsWithin } from '../utils/onThisDay';
 import { useTreeStore } from '../store/useTreeStore';
-import { fullName, initials } from '../utils/kinship';
-import { palette } from '../utils/palette';
+import { HeaderSearch } from './HeaderSearch';
+import { TreeSwitcherMenu } from './TreeSwitcherMenu';
 import { exportExcel, exportPdf } from '../utils/export';
 import { repo } from '../data/repository';
-import { year } from '../utils/dates';
+import { treeTitle } from '../utils/treeTitle';
 
 const btn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 7,
@@ -15,22 +15,27 @@ const btn: React.CSSProperties = {
 };
 
 export function AppHeader() {
-  const store = useTreeStore();
+  const trees = useTreeStore(s => s.trees);
+  const activeTreeId = useTreeStore(s => s.activeTreeId);
+  const view = useTreeStore(s => s.view);
+  const session = useTreeStore(s => s.session);
+  const winW = useTreeStore(s => s.winW);
+  const treeMenu = useTreeStore(s => s.treeMenu);
+  const dataMenu = useTreeStore(s => s.dataMenu);
+  const exportMenu = useTreeStore(s => s.exportMenu);
+  const userMenu = useTreeStore(s => s.userMenu);
+  const searchOpen = useTreeStore(s => s.searchOpen);
+  const persons = useTreeStore(s => s.persons);
+  const unions = useTreeStore(s => s.unions);
+  const isAdmin = useTreeStore(s => s.isAdmin());
   const {
-    trees, activeTreeId, view, session, winW,
-    headerQ, treeMenu, dataMenu, exportMenu, userMenu, searchOpen,
-    persons, unions,
     setView, setInviteOpen, setDataMenu, setTreeMenu, setExportMenu, setUserMenu, setSearchOpen,
-    setHeaderQ, openPanel, switchTree, setNewTreeOpen, closeHeaderMenus,
-    toggleDemoRole, signOut, openAddDialog, setNotice,
-  } = store;
-
-  const isAdmin = store.isAdmin();
-  const setOnThisDayOpen = useTreeStore(s => s.setOnThisDayOpen);
-  const isOwner = useTreeStore(s => s.isOwner());
-  const setDeleteTreeOpen = useTreeStore(s => s.setDeleteTreeOpen);
+    closeHeaderMenus, toggleDemoRole, signOut, openAddDialog, setNotice, setOnThisDayOpen,
+  } = useTreeStore.getState();
   const startTour = useTreeStore(s => s.startTour);
   const setAboutOpen = useTreeStore(s => s.setAboutOpen);
+  const superAdmin = useTreeStore(s => s.superAdmin);
+  const setRefDataOpen = useTreeStore(s => s.setRefDataOpen);
   // Recomputed only when the tree changes; drives the badge on the button.
   const todayCount = useMemo(
     () => eventsWithin({ persons, unions }, new Date(), 0).length,
@@ -40,24 +45,7 @@ export function AppHeader() {
   const isMobile = winW < 640;
 
   const activeTree = trees.find(t => t.id === activeTreeId);
-  const treeTitle = activeTree ? `${activeTree.name} Family Tree` : 'Family Tree';
-
-  // Search spans people, places and archive titles — each tagged in the results.
-  const q = headerQ.trim().toLowerCase();
-  const results = q.length > 1
-    ? persons.flatMap(p => {
-        const out: Array<{ id: string; title: string; sub: string; tag: string }> = [];
-        if (`${p.first} ${p.middle} ${p.last}`.toLowerCase().includes(q)) {
-          out.push({ id: p.id, title: fullName(p), sub: `${p.label} · ${year(p.dob)}`, tag: 'PERSON' });
-        } else if (`${p.pob} ${p.residency}`.toLowerCase().includes(q)) {
-          out.push({ id: p.id, title: fullName(p), sub: p.residency || p.pob, tag: 'PLACE' });
-        } else {
-          const rec = p.archives.find(a => a.title.toLowerCase().includes(q));
-          if (rec) out.push({ id: p.id, title: rec.title, sub: `${fullName(p)} · ${rec.year}`, tag: 'RECORD' });
-        }
-        return out;
-      }).slice(0, 8)
-    : [];
+  const title = treeTitle(activeTree?.name ?? '');
 
   const headerRef = useRef<HTMLElement>(null);
   const csvRef = useRef<HTMLInputElement>(null);
@@ -89,67 +77,7 @@ export function AppHeader() {
     }
   };
 
-  const searchField = (
-    <div style={{ position: 'relative', width: '100%' }}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A8A29E" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 13, top: 11 }}>
-        <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.4-3.4" />
-      </svg>
-      <input
-        type="text"
-        placeholder="Search ancestors, names, places"
-        value={headerQ}
-        onChange={e => setHeaderQ(e.target.value)}
-        autoFocus={searchOpen}
-        style={{
-          width: '100%', boxSizing: 'border-box', padding: '9px 12px 9px 36px',
-          borderRadius: 10, border: '1px solid #E7E2DC', background: '#FAF8F5',
-          fontSize: 13, color: '#1C1917', outline: 'none', fontFamily: 'inherit',
-        }}
-      />
-      {q.length > 1 && (
-        <div style={{
-          position: 'absolute', top: 44, left: 0, right: 0, background: '#fff',
-          border: '1px solid #E7E2DC', borderRadius: 14,
-          boxShadow: '0 18px 44px rgba(28,25,23,.14)', padding: 7,
-          maxHeight: 340, overflowY: 'auto', zIndex: 60,
-        }}>
-          {results.length === 0 && (
-            <div style={{ padding: 14, fontSize: 12.5, color: '#A8A29E', textAlign: 'center' }}>No matches</div>
-          )}
-          {results.map((r, i) => {
-            const p = persons.find(x => x.id === r.id)!;
-            const c = palette(p.gender);
-            return (
-              <button
-                key={`${r.id}-${i}`}
-                type="button"
-                onClick={() => { openPanel(r.id); setView('tree'); }}
-                style={{
-                  display: 'flex', width: '100%', alignItems: 'center', gap: 10,
-                  padding: '8px 10px', borderRadius: 9, border: 'none',
-                  background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
-                }}
-              >
-                <span style={{
-                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                  background: c.avFill, color: c.avText,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10.5, fontWeight: 800,
-                }}>
-                  {initials(p)}
-                </span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{r.title}</span>
-                  <span style={{ display: 'block', fontSize: 11, color: '#78716C' }}>{r.sub}</span>
-                </span>
-                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', color: '#A8A29E' }}>{r.tag}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  const searchField = <HeaderSearch autoFocus={searchOpen} />;
 
   return (
     <header
@@ -171,7 +99,7 @@ export function AppHeader() {
           </svg>
         </div>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.15 }}>{treeTitle}</div>
+          <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.15 }}>{title}</div>
           <button
             type="button"
             onClick={() => setTreeMenu(!treeMenu)}
@@ -183,44 +111,7 @@ export function AppHeader() {
           </button>
         </div>
 
-        {treeMenu && (
-          <div style={{ position: 'absolute', top: 52, left: 0, width: 260, background: '#fff', border: '1px solid #E7E2DC', borderRadius: 14, boxShadow: '0 18px 44px rgba(28,25,23,.14)', padding: 7, zIndex: 60 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.11em', color: '#A8A29E', padding: '7px 10px 5px' }}>MY TREES</div>
-            {trees.map(t => (
-              <button key={t.id} type="button" onClick={() => switchTree(t.id)} style={{
-                display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none',
-                background: t.id === activeTreeId ? '#FEF6F1' : 'none', cursor: 'pointer',
-                fontSize: 13, fontWeight: 600, width: '100%', textAlign: 'left', fontFamily: 'inherit',
-                color: t.id === activeTreeId ? '#C2410C' : '#292524',
-              }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: t.id === activeTreeId ? '#C2410C' : '#A8A29E' }} />
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name} Family Tree</span>
-                {t.role && (
-                  <span style={{
-                    flexShrink: 0, padding: '2px 7px', borderRadius: 99, fontSize: 9.5, fontWeight: 800, letterSpacing: '.05em',
-                    background: t.role === 'admin' ? '#FEF3C7' : '#F0EDE9', color: t.role === 'admin' ? '#92400E' : '#57534E',
-                  }}>{t.role === 'admin' ? 'ADMIN' : 'VIEWER'}</span>
-                )}
-              </button>
-            ))}
-            {/* Anyone can start their own archive, including viewers of this one. */}
-            {(
-              <>
-                <div style={{ height: 1, background: '#F0EBE5', margin: '6px 4px' }} />
-                <button type="button" onClick={() => { setTreeMenu(false); setNewTreeOpen(true); }} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#C2410C', textAlign: 'left', fontFamily: 'inherit' }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-                  Create new family tree
-                </button>
-                {isOwner && (
-                  <button type="button" onClick={() => setDeleteTreeOpen(true)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 9, padding: '9px 10px', borderRadius: 9, border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#B91C1C', textAlign: 'left', fontFamily: 'inherit' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" /></svg>
-                    Delete this tree…
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        {treeMenu && <TreeSwitcherMenu />}
       </div>
 
       {/* Search — full field on wide screens, icon toggle when compact */}
@@ -449,10 +340,11 @@ export function AppHeader() {
                 </div>
               </div>
               <div style={{ height: 1, background: '#F0EBE5', margin: '6px 4px' }} />
-              {[
+              {([
                 ['Take the quick tour', () => { setUserMenu(false); startTour(); }],
                 ['About this app', () => setAboutOpen(true)],
-              ].map(([label, go]) => (
+                ...(superAdmin ? [['Reference data', () => setRefDataOpen(true)]] : []),
+              ] as Array<[string, () => void]>).map(([label, go]) => (
                 <button
                   key={label as string}
                   type="button"

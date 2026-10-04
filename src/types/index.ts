@@ -24,6 +24,27 @@ export interface MediaItem {
   url?: string;
 }
 
+/** One line of a person's education. Every field is optional free text. */
+export interface EducationEntry {
+  /** A code from the EDUCATION_LEVEL reference list, e.g. "Graduate". */
+  level: string;
+  /** Branch or specialisation, e.g. "Computer Science". */
+  branch: string;
+  institution: string;
+  /** Year of passing. */
+  year: string;
+}
+
+/** The shared reference lists curated by the app's super admins. */
+export type RefCategory = 'EDUCATION_LEVEL' | 'GOTRA' | 'SHASAN';
+
+export interface RefCode {
+  category: RefCategory;
+  code: string;
+  description: string;
+  createdAt: string;
+}
+
 export interface Person {
   id: string;
   first: string;
@@ -42,6 +63,7 @@ export interface Person {
   shasan: string;
   label: string;
   bio: string;
+  education: EducationEntry[];
   archives: Archive[];
   media: MediaItem[];
   sample: boolean;
@@ -201,6 +223,7 @@ export interface FormValues {
   shasan: string;
   label: string;
   bio: string;
+  education: EducationEntry[];
   mdate: string;
   mplace: string;
   /**

@@ -1,4 +1,5 @@
 import { useTreeStore } from '../store/useTreeStore';
+import { treeTitle } from '../utils/treeTitle';
 
 /**
  * Preview for a parsed CSV. Nothing has been written when this opens: the
@@ -79,7 +80,7 @@ export function CsvImportDialog() {
 
           {!blocked && (
             <div style={{ fontSize: 11.5, color: '#A8A29E', lineHeight: 1.5 }}>
-              Everything is saved in one step into the {treeName} Family Tree. If anything fails, nothing is saved.
+              Everything is saved in one step into the {treeTitle(treeName)}. If anything fails, nothing is saved.
             </div>
           )}
         </div>

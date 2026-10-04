@@ -1,4 +1,5 @@
 import type { Driver } from 'driver.js';
+import { treeTitle } from './treeTitle';
 
 /**
  * Guided walkthrough, built on driver.js (MIT, ~20 KB). Loaded on demand so it
@@ -21,7 +22,7 @@ interface TourStep {
 function steps(treeName: string): TourStep[] {
   return [
     {
-      title: `Welcome to the ${treeName} Family Tree`,
+      title: `Welcome to the ${treeTitle(treeName)}`,
       body: 'A quick look around — about a minute. You can leave at any time and replay it later from the footer.',
     },
     {
@@ -74,6 +75,12 @@ function steps(treeName: string): TourStep[] {
       target: 'data', adminOnly: true,
       title: 'Import and export CSV',
       body: 'Bring in a whole family from a spreadsheet (into an empty tree), or export one. Start from the template.',
+    },
+    {
+      // Phones only: the desktop header shows these as separate buttons.
+      target: 'mobile-menu',
+      title: 'Everything else',
+      body: 'On this day, inviting relatives, adding members, exports, CSV import and this tour are all in this menu.',
     },
     {
       target: 'tour-link',

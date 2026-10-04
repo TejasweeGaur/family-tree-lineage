@@ -229,7 +229,7 @@ export function TreeCanvas() {
                 isDim={!!bright && !bright[n.id]}
                 isVisible={vis(n.id)}
                 spouseName={sp ? fullName(sp) : ''}
-                mdate={u?.date ? `m. ${u.date}` : ''}
+                mdate={u?.date ? `m. ${shortDate(u.date)}` : ''}
                 city={person.residency || person.pob}
                 kinChip={focus && focus !== n.id ? kin(data, focus, n.id) : ''}
               />

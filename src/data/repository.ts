@@ -1,4 +1,4 @@
-import type { Person, Union, Archive, MediaItem, Invite, Role, Session, User, Tree, Member } from '../types';
+import type { Person, Union, Archive, MediaItem, Invite, Role, Session, User, Tree, Member, EducationEntry, RefCode, RefCategory } from '../types';
 import { preferredTree } from '../utils/lastTree';
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -91,9 +91,21 @@ export interface Repository {
   // bulk
   /** Writes a validated CSV plan in one transaction. Resolves when committed. */
   importPeople(treeId: string, plan: ImportPlan): Promise<void>;
+
+  // reference lists, shared by every tree
+  listRefCodes(): Promise<RefCode[]>;
+  /** Whether the signed-in user may edit the reference lists. */
+  isSuperAdmin(): Promise<boolean>;
+  saveRefCode(c: RefCode): Promise<RefCode>;
+  deleteRefCode(category: RefCategory, code: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- local
+
+/** Demo mode's education levels; Supabase seeds the same list in migration 0006. */
+const DEFAULT_EDUCATION_LEVELS = [
+  'Class X', 'Class XII', 'Diploma', 'Undergraduate', 'Graduate', 'Postgraduate', 'Doctorate', 'Other',
+];
 
 // Placeholder identity for demo mode only. Real users come from Supabase auth.
 const DEMO_USER: User = {
@@ -155,6 +167,22 @@ class LocalRepository implements Repository {
   readonly kind = 'local' as const;
   private listeners = new Set<(event: AuthEvent, s: Session | null) => void>();
   private invites: Invite[] = [];
+  private refCodes: RefCode[] = DEFAULT_EDUCATION_LEVELS.map((code, i) => ({
+    category: 'EDUCATION_LEVEL' as const, code, description: '',
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+  }));
+
+  async listRefCodes() { return this.refCodes; }
+  // The demo user can try the reference-data screen.
+  async isSuperAdmin() { return true; }
+  async saveRefCode(c: RefCode) {
+    const saved = { ...c, createdAt: c.createdAt || new Date().toISOString() };
+    this.refCodes = [...this.refCodes.filter(r => !(r.category === c.category && r.code === c.code)), saved];
+    return saved;
+  }
+  async deleteRefCode(category: RefCategory, code: string) {
+    this.refCodes = this.refCodes.filter(r => !(r.category === category && r.code === code));
+  }
 
   async getSession(): Promise<Session | null> {
     try {
@@ -277,6 +305,8 @@ type PersonRow = {
   dob: string; pob: string; dod: string; pod: string;
   occupation: string; residency: string; gotra: string; shasan: string;
   label: string; bio: string; photo_url: string | null;
+  /** Added by migration 0006; absent on rows read before it ran. */
+  education?: EducationEntry[] | null;
   origin_father: string; origin_father_dates: string;
   origin_mother: string; origin_mother_dates: string;
 };
@@ -288,6 +318,7 @@ function rowToPerson(r: PersonRow, archives: Archive[], media: MediaItem[]): Per
     dob: r.dob, pob: r.pob, dod: r.dod, pod: r.pod,
     occupation: r.occupation, residency: r.residency,
     gotra: r.gotra, shasan: r.shasan, label: r.label, bio: r.bio,
+    education: Array.isArray(r.education) ? r.education : [],
     photoUrl: r.photo_url ?? undefined,
     originFather: r.origin_father, originFatherDates: r.origin_father_dates,
     originMother: r.origin_mother, originMotherDates: r.origin_mother_dates,
@@ -302,6 +333,7 @@ function personToRow(p: Person, treeId?: string) {
     dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
     occupation: p.occupation, residency: p.residency,
     gotra: p.gotra, shasan: p.shasan, label: p.label, bio: p.bio,
+    education: p.education,
     // photo_url is deliberately absent: setPhoto() owns that column. Writing it
     // here could store an in-flight upload's data: URL (~100 KB of text) if a
     // profile was saved while its photo was still uploading.
@@ -873,6 +905,40 @@ class SupabaseRepository implements Repository {
       p_root: plan.rootRef,
     });
     if (error) throw error;
+  }
+
+  async listRefCodes(): Promise<RefCode[]> {
+    const { data, error } = await requireSupabase()
+      .from('ref_codes').select('*').order('aud_created_ts');
+    // Before migration 0006 the table doesn't exist: no shared lists yet,
+    // rather than an error on every load.
+    if (error) return [];
+    return (data ?? []).map(r => ({
+      category: r.code_category, code: r.code, description: r.description, createdAt: r.aud_created_ts,
+    }));
+  }
+
+  async isSuperAdmin(): Promise<boolean> {
+    const { data, error } = await requireSupabase().rpc('is_super_admin');
+    return !error && data === true;
+  }
+
+  async saveRefCode(c: RefCode): Promise<RefCode> {
+    const { data, error } = await requireSupabase()
+      .from('ref_codes')
+      .upsert({ code_category: c.category, code: c.code.trim(), description: c.description.trim() })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return { category: data.code_category, code: data.code, description: data.description, createdAt: data.aud_created_ts };
+  }
+
+  async deleteRefCode(category: RefCategory, code: string): Promise<void> {
+    const { error, count } = await requireSupabase()
+      .from('ref_codes').delete({ count: 'exact' })
+      .eq('code_category', category).eq('code', code);
+    if (error) throw error;
+    if (!count) throw new Error('That entry could not be deleted.');
   }
 }
 

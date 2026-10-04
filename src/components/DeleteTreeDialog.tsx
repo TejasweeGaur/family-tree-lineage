@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
+import { treeTitle } from '../utils/treeTitle';
 
 export function DeleteTreeDialog() {
   const open = useTreeStore(s => s.deleteTreeOpen);
@@ -34,7 +35,7 @@ function Confirm() {
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 16px',
       background: 'rgba(28,25,23,.5)', backdropFilter: 'blur(3px)',
     }}>
-      <div role="alertdialog" aria-label={`Delete the ${name} Family Tree`} onClick={e => e.stopPropagation()} style={{
+      <div role="alertdialog" aria-label={`Delete the ${treeTitle(name)}`} onClick={e => e.stopPropagation()} style={{
         width: 'min(470px, 96vw)', background: '#FFFDFB', borderRadius: 20,
         boxShadow: '0 26px 60px rgba(28,25,23,.3)', overflow: 'hidden',
       }}>
@@ -43,7 +44,7 @@ function Confirm() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13" /></svg>
           </span>
           <div>
-            <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.015em' }}>Delete the {name} Family Tree?</div>
+            <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.015em' }}>Delete the {treeTitle(name)}?</div>
             <div style={{ fontSize: 12.5, color: '#6B635C', marginTop: 3 }}>This can't be undone.</div>
           </div>
         </div>

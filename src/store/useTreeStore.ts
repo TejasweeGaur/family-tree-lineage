@@ -3,7 +3,7 @@ import type {
   Person, Union, Tree, Invite, Session, Role, Member,
   PanelTab, ViewMode, PanelMode, CanvasMode,
   FormState, FormValues, ArchiveFormState, Archive, MediaItem, DirSortKey, Gender,
-  RelativeKind, AddDialogState, ViewerRecord,
+  RelativeKind, AddDialogState, ViewerRecord, EducationEntry, RefCode, RefCategory,
 } from '../types';
 import { SEED_PERSONS, SEED_UNIONS, SEED_ROOT_ID, SEED_TREE_NAME } from '../data/seed';
 import { spousesOf, parentsOf, unionsOf, childrenOf, getRoot, fullName } from '../utils/kinship';
@@ -15,6 +15,7 @@ import { ARCHIVE_MAX_BYTES, formatBytes } from '../config/limits';
 import { readScaledPhoto } from '../utils/image';
 import { exportPeopleCsv, templateCsv, planImport, type ImportPlan } from '../utils/csv';
 import { triggerDownload } from '../utils/export';
+import { treeTitle } from '../utils/treeTitle';
 
 /**
  * The user whose tree is already loaded (or loading). Supabase re-emits
@@ -169,16 +170,37 @@ function kindLabel(group: string, gender: Gender): string {
   return gender === 'Male' ? m[0] : gender === 'Female' ? m[1] : m[2];
 }
 
+/** Drops rows the user added but left completely blank. */
+function cleanEducation(rows: EducationEntry[]): EducationEntry[] {
+  return rows
+    .map(r => ({ level: r.level.trim(), branch: r.branch.trim(), institution: r.institution.trim(), year: r.year.trim() }))
+    .filter(r => r.level || r.branch || r.institution || r.year);
+}
+
 function emptyValues(): FormValues {
   return {
     first: '', last: '', middle: '', gender: 'Other', living: true,
     dob: '', pob: '', dod: '', pod: '',
     occupation: '', residency: '', gotra: '', shasan: '',
-    label: '', bio: '', mdate: '', mplace: '', photo: '',
+    label: '', bio: '', education: [], mdate: '', mplace: '', photo: '',
   };
 }
 
 type Store = AppState & {
+  // Reference lists (education levels, gotras, shasans), shared by every tree
+  refCodes: RefCode[];
+  superAdmin: boolean;
+  refDataOpen: boolean;
+  /** Mobile header: the menu holding every action that doesn't fit on screen. */
+  mobileMenu: boolean;
+  setMobileMenu: (v: boolean) => void;
+  loadRefCodes: () => Promise<void>;
+  setRefDataOpen: (v: boolean) => void;
+  saveRefCode: (c: RefCode) => Promise<boolean>;
+  deleteRefCode: (category: RefCategory, code: string) => Promise<void>;
+  /** Shared codes for a category plus every value already used in this tree, sorted. */
+  refOptions: (category: RefCategory) => string[];
+
   // Auth
   initAuth: () => Promise<void>;
   loadActiveTree: (treeId: string) => Promise<void>;
@@ -324,7 +346,9 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   view: 'tree',
   zoom: 1,
-  mode: 'scroll',
+  // Drag to pan by default: it's what people expect of a canvas, and mouse
+  // wheel scrolling still works in either mode.
+  mode: 'drag',
 
   focus: null,
   branch: null,
@@ -361,6 +385,10 @@ export const useTreeStore = create<Store>((set, get) => ({
   viewerRecord: null,
   treeUpdatedAt: null,
   aboutOpen: false,
+  refCodes: [],
+  superAdmin: false,
+  refDataOpen: false,
+  mobileMenu: false,
   onThisDayOpen: false,
   members: [],
   membersLoading: false,
@@ -395,6 +423,9 @@ export const useTreeStore = create<Store>((set, get) => ({
 
     const session = await repo.getSession();
     set({ session, authReady: true });
+    // Demo mode never calls loadActiveTree (the seed is already in the store),
+    // so the reference lists are loaded here instead.
+    if (repo.kind === 'local') void get().loadRefCodes();
 
     repo.onAuthChange((event, s) => {
       if (event === 'SIGNED_OUT') {
@@ -421,6 +452,8 @@ export const useTreeStore = create<Store>((set, get) => ({
   },
 
   loadActiveTree: async (treeId: string) => {
+    // Not awaited: the lists only feed dropdowns, so the tree needn't wait.
+    void get().loadRefCodes();
     try {
       const [snap, memberships] = await Promise.all([
         repo.loadTree(treeId),
@@ -586,7 +619,7 @@ export const useTreeStore = create<Store>((set, get) => ({
   setSearchOpen: v => set({ searchOpen: v }),
   setPlusMenu: (id, pos) => set({ plusMenu: id, plusPos: pos || { x: 0, y: 0 } }),
   closeAllMenus: () => set({
-    dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false,
+    dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false, mobileMenu: false,
     showFilters: false, plusMenu: null,
   }),
   /**
@@ -596,7 +629,7 @@ export const useTreeStore = create<Store>((set, get) => ({
    * PlusMenu handles its own outside-click.
    */
   closeHeaderMenus: () => set({
-    dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false,
+    dataMenu: false, treeMenu: false, exportMenu: false, userMenu: false, mobileMenu: false,
     showFilters: false,
   }),
 
@@ -663,7 +696,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           living: !p.dod, dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
           occupation: p.occupation, residency: p.residency,
           gotra: p.gotra, shasan: p.shasan,
-          label: p.label, bio: p.bio,
+          label: p.label, bio: p.bio, education: p.education,
           mdate: u?.date || '', mplace: u?.place || '',
           photo: p.photoUrl || '',
         },
@@ -714,7 +747,7 @@ export const useTreeStore = create<Store>((set, get) => ({
             dod: v.living ? '' : v.dod, pod: v.living ? '' : v.pod,
             occupation: v.occupation, residency: v.residency,
             gotra: v.gotra, shasan: v.shasan,
-            label: v.label, bio: v.bio, photoUrl,
+            label: v.label, bio: v.bio, education: cleanEducation(v.education), photoUrl,
           }
         : p);
       const u = newUnions.find(x => x.a === form.targetId || x.b === form.targetId);
@@ -750,7 +783,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       occupation: v.occupation, residency: v.residency,
       gotra: v.gotra, shasan: v.shasan,
       label: v.label || (form.group === 'spouse' ? 'Married in' : kindLabel(form.group, v.gender)),
-      bio: v.bio, archives: [], media: [], sample: false,
+      bio: v.bio, education: cleanEducation(v.education), archives: [], media: [], sample: false,
       originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',
     };
 
@@ -1149,7 +1182,7 @@ export const useTreeStore = create<Store>((set, get) => ({
       } else {
         const ids = new Map(csvPlan.people.map(p => [p.ref, nid()]));
         const newPersons: Person[] = csvPlan.people.map(({ ref, ...p }) => ({
-          ...p, id: ids.get(ref)!, archives: [], media: [], sample: false,
+          ...p, id: ids.get(ref)!, education: [], archives: [], media: [], sample: false,
           originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',
         }));
         const newUnions: Union[] = csvPlan.unions.map(u => ({
@@ -1180,7 +1213,55 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   openViewer: record => set({ viewerRecord: record }),
   closeViewer: () => set({ viewerRecord: null }),
-  setAboutOpen: v => set({ aboutOpen: v, userMenu: false }),
+  setAboutOpen: v => set({ aboutOpen: v, userMenu: false, mobileMenu: false }),
+
+  setMobileMenu: v => set({ mobileMenu: v }),
+
+  loadRefCodes: async () => {
+    const [refCodes, superAdmin] = await Promise.all([
+      repo.listRefCodes().catch(() => [] as RefCode[]),
+      repo.isSuperAdmin().catch(() => false),
+    ]);
+    set({ refCodes, superAdmin });
+  },
+
+  setRefDataOpen: v => set({ refDataOpen: v, userMenu: false, mobileMenu: false }),
+
+  saveRefCode: async c => {
+    if (!c.code.trim()) return false;
+    try {
+      const saved = await repo.saveRefCode(c);
+      set(s => ({
+        refCodes: [
+          ...s.refCodes.filter(r => !(r.category === saved.category && r.code === saved.code)),
+          saved,
+        ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      }));
+      return true;
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not save that entry.' });
+      return false;
+    }
+  },
+
+  deleteRefCode: async (category, code) => {
+    try {
+      await repo.deleteRefCode(category, code);
+      set(s => ({ refCodes: s.refCodes.filter(r => !(r.category === category && r.code === code)) }));
+    } catch (e) {
+      set({ notice: e instanceof Error ? e.message : 'Could not delete that entry.' });
+    }
+  },
+
+  refOptions: category => {
+    const { refCodes, persons } = get();
+    const shared = refCodes.filter(r => r.category === category).map(r => r.code);
+    // Education levels keep the curated order; gotras and shasans are better
+    // found alphabetically, and include whatever this family has entered.
+    if (category === 'EDUCATION_LEVEL') return shared;
+    const used = persons.map(p => (category === 'GOTRA' ? p.gotra : p.shasan).trim()).filter(Boolean);
+    return [...new Set([...shared, ...used])].sort((a, b) => a.localeCompare(b));
+  },
   setOnThisDayOpen: v => set({ onThisDayOpen: v }),
   isOwner: () => {
     const { session, trees, activeTreeId } = get();
@@ -1251,7 +1332,7 @@ export const useTreeStore = create<Store>((set, get) => ({
           deleteTreeOpen: false, deletingTree: false, treeCache,
           trees: s.trees.filter(t => t.id !== activeTreeId),
           panel: null, focus: null, branch: null,
-          notice: `${name} Family Tree has been deleted`,
+          notice: `${treeTitle(name)} has been deleted`,
         };
       });
       await get().moveToNextTree();

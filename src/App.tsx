@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useTreeStore } from './store/useTreeStore';
 import { AppHeader } from './components/AppHeader';
+import { MobileHeader } from './components/MobileHeader';
+import { RefDataModal } from './components/RefDataModal';
 import { Toolbar } from './components/Toolbar';
 import { TreeCanvas } from './components/TreeCanvas';
 import { DirectoryView } from './components/DirectoryView';
@@ -56,6 +58,7 @@ function App() {
       if (e.key !== 'Escape') return;
       const s = useTreeStore.getState();
       if (s.deleteTreeOpen) return s.setDeleteTreeOpen(false);
+      if (s.refDataOpen) return s.setRefDataOpen(false);
       if (s.aboutOpen) return s.setAboutOpen(false);
       if (s.onThisDayOpen) return s.setOnThisDayOpen(false);
       if (s.photoView) return s.closePhotoView();
@@ -94,10 +97,11 @@ function App() {
       color: '#1C1917', height: '100vh',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F7F5F2',
     }}>
-      <AppHeader />
+      {isMobile ? <MobileHeader /> : <AppHeader />}
       <Toolbar />
 
-      {view === 'tree' && (
+      {/* The colour key; phones skip it to leave the tree more room. */}
+      {view === 'tree' && !isMobile && (
         <div style={{
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 22,
           padding: `9px ${gutter}px`, height: 38, boxSizing: 'border-box',
@@ -137,6 +141,7 @@ function App() {
       <CsvImportDialog />
       <PhotoLightbox />
       <AboutModal />
+      <RefDataModal />
       <OnThisDayModal />
       <DeleteTreeDialog />
       <PlusMenu />

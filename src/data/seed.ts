@@ -34,7 +34,7 @@ function P(
   return {
     id, first, last, gender, dob, pob, dod, pod,
     occupation, residency, label, middle,
-    gotra: '', shasan: '',
+    gotra: '', shasan: '', education: [],
     bio: '', archives: [], media: [],
     sample: first === 'Child' || first === 'Spouse' || first === 'Parent',
     originFather: '', originFatherDates: '', originMother: '', originMotherDates: '',

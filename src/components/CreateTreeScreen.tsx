@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { COUNTRY_HINTS } from '../data/countries';
+import { treeTitle } from '../utils/treeTitle';
 
 /**
  * Shown when someone is signed in but holds no membership. That is the normal
@@ -64,7 +65,7 @@ export function CreateTreeScreen() {
             placeholder="e.g. Gaur" autoFocus style={inputStyle}
           />
           <span style={{ display: 'block', fontSize: 11, color: '#A8A29E', marginTop: 5 }}>
-            Shown as “{name.trim() || 'Family name'} Family Tree” throughout the app.
+            Shown as “{treeTitle(name.trim() || 'Family name')}” throughout the app.
           </span>
         </label>
 

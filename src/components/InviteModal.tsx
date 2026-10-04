@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { MembersTab } from './MembersTab';
 import { useTreeStore } from '../store/useTreeStore';
 import type { Role } from '../types';
+import { treeTitle } from '../utils/treeTitle';
 
 const ROLE_COPY: Record<Role, { title: string; body: string }> = {
   admin: { title: 'Admin', body: 'Add, edit and delete members, upload archives, import data.' },
@@ -66,8 +67,8 @@ export function InviteModal() {
             <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.015em' }}>Family access</div>
             <div style={{ fontSize: 12.5, color: '#6B635C', marginTop: 3, lineHeight: 1.45 }}>
               {tab === 'invite'
-                ? `Share a link with family. They sign in with Google to join the ${treeName} Family Tree.`
-                : `Everyone who can see the ${treeName} Family Tree.`}
+                ? `Share a link with family. They sign in with Google to join the ${treeTitle(treeName)}.`
+                : `Everyone who can see the ${treeTitle(treeName)}.`}
             </div>
           </div>
           <button
