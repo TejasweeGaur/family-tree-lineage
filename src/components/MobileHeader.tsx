@@ -169,7 +169,7 @@ export function MobileHeader() {
       {menuOpen && session && (
         <div role="menu" style={{
           position: 'absolute', top: '100%', right: 8, left: 8, marginTop: 4,
-          maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
+          maxHeight: 'calc(100dvh - 150px)', overflowY: 'auto',
           background: '#fff', border: '1px solid #E7E2DC', borderRadius: 16,
           boxShadow: '0 22px 50px rgba(28,25,23,.2)', padding: 7, zIndex: 60,
         }}>

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { DateField } from './DateField';
 import { useTreeStore } from '../store/useTreeStore';
 import { ARCHIVE_CATEGORIES } from '../data/seed';
 import { compressDocumentImage } from '../utils/image';
@@ -13,10 +14,13 @@ export function ArchiveForm() {
   const [compressing, setCompressing] = useState(false);
   // Size before compression, to show what was saved. Null when unchanged.
   const [originalSize, setOriginalSize] = useState<number | null>(null);
+  const [yearOk, setYearOk] = useState(true);
+  const onYearValidity = useCallback((ok: boolean) => setYearOk(ok), []);
+  const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   if (!archiveForm) return null;
 
   const person = store.persons.find(p => p.id === archiveForm.targetId);
-  const canSave = !!archiveForm.title && !savingArchive && !compressing;
+  const canSave = !!archiveForm.title && yearOk && !savingArchive && !compressing;
   const isEdit = !!archiveForm.editId;
   // Editing a record whose file is kept as-is: we have its name, not its bytes.
   const keepingExisting = isEdit && !archiveForm.fileData && !!archiveForm.file;
@@ -77,7 +81,7 @@ export function ArchiveForm() {
       onClick={e => e.stopPropagation()}
     >
       <div role="dialog" aria-label="Archive record" style={{
-        width: 'min(680px,96vw)', maxHeight: '94vh',
+        width: 'min(680px,96vw)', maxHeight: '94dvh',
         background: '#FFFDFB', borderRadius: 20,
         boxShadow: '0 30px 80px rgba(28,25,23,.3)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -171,7 +175,7 @@ export function ArchiveForm() {
               </div>
             ) : (
               <>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>Drag and drop a scan or photo here</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#57534E' }}>{touch ? 'Add a scan or photo' : 'Drag and drop a scan or photo here'}</div>
                 <div style={{ fontSize: 11.5, color: '#A8A29E', marginTop: 3, lineHeight: 1.5 }}>
                   {compressing
                     ? 'Compressing…'
@@ -198,10 +202,7 @@ export function ArchiveForm() {
                 {ARCHIVE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <label style={{ display: 'block' }}>
-              <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#78716C', marginBottom: 5 }}>Year / Date Created</span>
-              <input type="text" value={archiveForm.year} onChange={e => store.setArchiveField('year', e.target.value)} placeholder="YYYY or YYYY-MM-DD" style={inputStyle} />
-            </label>
+            <DateField label="Year / Date Created" value={archiveForm.year} onChange={v => store.setArchiveField('year', v)} onValidity={onYearValidity} noFuture />
           </div>
 
           <label style={{ display: 'block' }}>

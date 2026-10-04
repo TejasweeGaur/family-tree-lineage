@@ -101,6 +101,7 @@ export const PersonCard = memo(function PersonCard({
         {isAdmin && (
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 5, flexShrink: 0 }}>
             <button
+              className="hit-expand"
               onClick={e => { e.stopPropagation(); askDelete(person.id); }}
               aria-label={`Delete ${fullName(person)}`}
               style={{
@@ -114,6 +115,7 @@ export const PersonCard = memo(function PersonCard({
               </svg>
             </button>
             <button
+              className="hit-expand"
               ref={plusBtnRef}
               data-tour="card-plus"
               onClick={handlePlus}

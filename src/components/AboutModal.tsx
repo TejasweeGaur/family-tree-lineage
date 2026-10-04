@@ -35,7 +35,7 @@ export function AboutModal() {
         aria-label={`About ${APP_NAME}, ${APP_TAGLINE}`}
         onClick={e => e.stopPropagation()}
         style={{
-          width: 'min(520px, 96vw)', maxHeight: '92vh', overflowY: 'auto',
+          width: 'min(520px, 96vw)', maxHeight: '92dvh', overflowY: 'auto',
           background: '#FFFDFB', borderRadius: 20, boxShadow: '0 26px 60px rgba(28,25,23,.26)',
         }}
       >

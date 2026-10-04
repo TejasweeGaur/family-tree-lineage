@@ -66,7 +66,7 @@ export function OnThisDayModal() {
       background: 'rgba(28,25,23,.42)', backdropFilter: 'blur(3px)',
     }}>
       <div role="dialog" aria-label="On this day" onClick={e => e.stopPropagation()} style={{
-        width: 'min(560px, 96vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        width: 'min(560px, 96vw)', maxHeight: '92dvh', display: 'flex', flexDirection: 'column',
         background: '#FFFDFB', borderRadius: 20, boxShadow: '0 26px 60px rgba(28,25,23,.26)', overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '18px 22px 14px', borderBottom: '1px solid #EFE9E2' }}>

@@ -48,7 +48,7 @@ export function MembersTab() {
         Removing someone takes their access away immediately; revoking their invite link doesn't.
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: '50vh', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: '50dvh', overflowY: 'auto' }}>
         {members.map(m => {
           const me = m.userId === myId;
           const isArmed = armed === m.userId;

@@ -20,16 +20,19 @@ interface TourStep {
 }
 
 function steps(treeName: string): TourStep[] {
+  // Touch screens tap and pinch; there's no Ctrl + scroll on a phone.
+  const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+  const click = touch ? 'Tap' : 'Click';
   return [
     {
       title: `Welcome to the ${treeTitle(treeName)}`,
-      body: 'A quick look around — about a minute. You can leave at any time and replay it later from the footer.',
+      body: `A quick look around — about a minute. You can leave at any time and replay it later from the ${touch ? 'menu' : 'footer'}.`,
     },
     {
       // Placement left to driver.js: the canvas fills most of the screen.
       target: 'canvas',
       title: 'The tree',
-      body: 'Each card is a person. Click a card for their profile — photos, documents, biography and family. Click a connecting line to highlight a whole branch. Drag to move around; Ctrl + scroll to zoom.',
+      body: `Each card is a person. ${click} a card for their profile — photos, documents, biography and family. ${click} a connecting line to highlight a whole branch. Drag to move around; ${touch ? 'pinch with two fingers to zoom' : 'Ctrl + scroll to zoom'}.`,
     },
     {
       target: 'card-plus', adminOnly: true,

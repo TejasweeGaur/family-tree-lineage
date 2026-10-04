@@ -65,7 +65,7 @@ function Dialog() {
       padding: '3vh 12px', background: 'rgba(28,25,23,.5)', backdropFilter: 'blur(3px)',
     }}>
       <div role="dialog" aria-label="Reference data" onClick={e => e.stopPropagation()} style={{
-        width: 'min(640px, 96vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        width: 'min(640px, 96vw)', maxHeight: '92dvh', display: 'flex', flexDirection: 'column',
         background: '#FFFDFB', borderRadius: 20, boxShadow: '0 26px 60px rgba(28,25,23,.3)', overflow: 'hidden',
       }}>
         <div style={{ padding: '18px 22px 0', display: 'flex', alignItems: 'flex-start', gap: 12 }}>

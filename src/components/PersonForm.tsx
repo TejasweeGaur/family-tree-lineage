@@ -87,7 +87,7 @@ export function PersonForm() {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 16px', background: 'rgba(41,37,36,.42)', backdropFilter: 'blur(3px)' }}>
       <div role="dialog" aria-label="Family member form" style={{
-        width: 'min(880px,96vw)', maxHeight: '94vh',
+        width: 'min(880px,96vw)', maxHeight: '94dvh',
         background: '#FFFDFB', borderRadius: 20,
         boxShadow: '0 30px 80px rgba(28,25,23,.3)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -109,7 +109,7 @@ export function PersonForm() {
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 22px 26px', display: 'flex', flexDirection: 'column', gap: 22 }}>
 
           {/* Avatar + gender */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: 16, border: '1px solid #EFE9E2', borderRadius: 16, background: '#FAF8F5' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, padding: 14, border: '1px solid #EFE9E2', borderRadius: 16, background: '#FAF8F5' }}>
             <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <input
                 ref={fileRef}
@@ -142,8 +142,9 @@ export function PersonForm() {
                 >Remove</button>
               )}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.12em', color: '#A8A29E', marginBottom: 9 }}>GENDER (COLOR IDENTIFICATION) *</div>
+            {/* Wraps below the photo on a phone, where three buttons beside it don't fit. */}
+            <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.12em', color: '#A8A29E', marginBottom: 9 }}>GENDER *</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {(['Male', 'Female', 'Other'] as const).map(g => {
                   const active = v.gender === g;
@@ -152,7 +153,7 @@ export function PersonForm() {
                   const color = active ? (g === 'Male' ? '#075985' : g === 'Female' ? '#9D174D' : '#44403C') : '#57534E';
                   return (
                     <button key={g} type="button" onClick={() => store.setFormValue('gender', g)} style={{
-                      padding: '9px 18px', borderRadius: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+                      flex: '1 1 0', minWidth: 0, maxWidth: 120, padding: '10px 6px', borderRadius: 10, fontFamily: 'inherit', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
                       background: bg, border: `1.5px solid ${border}`, color,
                     }}>{g}</button>
                   );

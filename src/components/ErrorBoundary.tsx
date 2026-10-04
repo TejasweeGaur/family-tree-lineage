@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
     return (
       <div role="alert" style={{
-        minHeight: '100vh', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100dvh', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 20, background: '#F7F5F2', fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", color: '#1C1917',
       }}>
         <div style={{

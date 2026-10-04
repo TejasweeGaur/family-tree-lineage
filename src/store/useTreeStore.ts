@@ -567,7 +567,8 @@ export const useTreeStore = create<Store>((set, get) => ({
   },
 
   setView: v => set({ view: v }),
-  setZoom: z => set({ zoom: Math.min(1.8, Math.max(0.5, Math.round(z * 100) / 100)) }),
+  // Down to 20% so Fit can show a whole large tree on a phone.
+  setZoom: z => set({ zoom: Math.min(1.8, Math.max(0.2, Math.round(z * 100) / 100)) }),
   setMode: m => set({ mode: m }),
   setFocus: id => set({ focus: id }),
   setBranch: uid => set(s => ({ branch: s.branch === uid ? null : uid })),

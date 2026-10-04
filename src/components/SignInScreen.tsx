@@ -52,84 +52,7 @@ export function SignInScreen() {
   // role is read from the stored token at sign-in, never from the URL.
   const invitedRole = new URLSearchParams(window.location.search).get('role');
 
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 200, overflowY: 'auto',
-      display: 'flex', flexDirection: 'column',
-      background: '#F7F5F2',
-      backgroundImage: 'radial-gradient(#DED7CE 1.1px, transparent 1.1px)',
-      backgroundSize: '22px 22px',
-      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-      color: '#1C1917',
-    }}>
-      <div style={{
-        flex: '1 0 auto', width: '100%', boxSizing: 'border-box',
-        display: 'grid', alignItems: 'center',
-        gridTemplateColumns: stacked ? '1fr' : 'minmax(0,1.05fr) minmax(0,.95fr)',
-        gap: stacked ? 34 : 56,
-        maxWidth: 1080, margin: '0 auto',
-        padding: stacked ? '38px 20px 44px' : '48px 32px',
-      }}>
-
-        {/* ------------------------------------------------ overview */}
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 46, height: 46, borderRadius: 14, background: '#C2410C', flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round">
-                <circle cx="12" cy="5" r="2.6" /><circle cx="5.5" cy="18.5" r="2.6" /><circle cx="18.5" cy="18.5" r="2.6" />
-                <path d="M12 7.6V12M5.5 15.9v-1.6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1.6" />
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>{APP_NAME}</div>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#78716C' }}>{APP_TAGLINE}</div>
-            </div>
-          </div>
-
-          <h1 style={{
-            fontSize: stacked ? 30 : 38, fontWeight: 800, letterSpacing: '-0.03em',
-            lineHeight: 1.1, margin: '20px 0 0',
-          }}>
-            Every family is a<br />record worth keeping.
-          </h1>
-          <p style={{ fontSize: 15, color: '#6B635C', lineHeight: 1.6, margin: '12px 0 0', maxWidth: 460 }}>
-            A private archive for your family's tree, its stories and its documents —
-            built to be handed down, not lost in a folder somewhere.
-          </p>
-
-          <div style={{
-            margin: '26px 0 0', padding: stacked ? '16px 12px' : '20px 16px',
-            background: 'rgba(255,253,251,.7)', border: '1px solid #EFE9E2',
-            borderRadius: 18, display: 'flex', justifyContent: 'center',
-          }}>
-            <TreePreview />
-          </div>
-
-          <ul style={{ listStyle: 'none', padding: 0, margin: '24px 0 0', display: 'grid', gap: 15 }}>
-            {FEATURES.map(f => (
-              <li key={f.title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <span style={{
-                  flexShrink: 0, width: 30, height: 30, borderRadius: 9,
-                  background: '#FEF6F1', color: '#C2410C',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    {f.icon}
-                  </svg>
-                </span>
-                <span style={{ minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>{f.title}</span>
-                  <span style={{ display: 'block', fontSize: 12.5, color: '#78716C', lineHeight: 1.5, marginTop: 2 }}>{f.body}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* ------------------------------------------------ sign in */}
+  const signInColumn = (
         <div style={{ minWidth: 0, display: 'flex', justifyContent: stacked ? 'center' : 'flex-end' }}>
           <div style={{
             width: '100%', maxWidth: 400, boxSizing: 'border-box',
@@ -201,6 +124,91 @@ export function SignInScreen() {
             )}
           </div>
         </div>
+  );
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200, overflowY: 'auto',
+      display: 'flex', flexDirection: 'column',
+      background: '#F7F5F2',
+      backgroundImage: 'radial-gradient(#DED7CE 1.1px, transparent 1.1px)',
+      backgroundSize: '22px 22px',
+      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+      color: '#1C1917',
+    }}>
+      <div style={{
+        flex: '1 0 auto', width: '100%', boxSizing: 'border-box',
+        display: 'grid', alignItems: 'center',
+        gridTemplateColumns: stacked ? '1fr' : 'minmax(0,1.05fr) minmax(0,.95fr)',
+        gap: stacked ? 34 : 56,
+        maxWidth: 1080, margin: '0 auto',
+        padding: stacked ? '38px 20px 44px' : '48px 32px',
+      }}>
+
+        {/* ------------------------------------------------ overview */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 46, height: 46, borderRadius: 14, background: '#C2410C', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round">
+                <circle cx="12" cy="5" r="2.6" /><circle cx="5.5" cy="18.5" r="2.6" /><circle cx="18.5" cy="18.5" r="2.6" />
+                <path d="M12 7.6V12M5.5 15.9v-1.6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1.6" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>{APP_NAME}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#78716C' }}>{APP_TAGLINE}</div>
+            </div>
+          </div>
+
+          <h1 style={{
+            fontSize: stacked ? 30 : 38, fontWeight: 800, letterSpacing: '-0.03em',
+            lineHeight: 1.1, margin: '20px 0 0',
+          }}>
+            Every family is a<br />record worth keeping.
+          </h1>
+          <p style={{ fontSize: 15, color: '#6B635C', lineHeight: 1.6, margin: '12px 0 0', maxWidth: 460 }}>
+            A private archive for your family's tree, its stories and its documents —
+            built to be handed down, not lost in a folder somewhere.
+          </p>
+
+          {/* On a phone the sign-in comes straight after the pitch, rather
+              than below the whole feature list where nobody scrolls to it. */}
+          {stacked && <div style={{ marginTop: 26 }}>{signInColumn}</div>}
+
+          <div style={{
+            margin: '26px 0 0', padding: stacked ? '16px 12px' : '20px 16px',
+            background: 'rgba(255,253,251,.7)', border: '1px solid #EFE9E2',
+            borderRadius: 18, display: 'flex', justifyContent: 'center',
+          }}>
+            <TreePreview />
+          </div>
+
+          <ul style={{ listStyle: 'none', padding: 0, margin: '24px 0 0', display: 'grid', gap: 15 }}>
+            {FEATURES.map(f => (
+              <li key={f.title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <span style={{
+                  flexShrink: 0, width: 30, height: 30, borderRadius: 9,
+                  background: '#FEF6F1', color: '#C2410C',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    {f.icon}
+                  </svg>
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>{f.title}</span>
+                  <span style={{ display: 'block', fontSize: 12.5, color: '#78716C', lineHeight: 1.5, marginTop: 2 }}>{f.body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* ------------------------------------------------ sign in */}
+        {!stacked && signInColumn}
 
       </div>
       <AppFooter showTree={false} />

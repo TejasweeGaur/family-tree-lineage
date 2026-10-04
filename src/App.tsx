@@ -82,19 +82,20 @@ function App() {
   }
 
   if (!authReady) {
-    return <div style={{ height: '100vh', background: '#F7F5F2' }} />;
+    return <div style={{ height: '100dvh', background: '#F7F5F2' }} />;
   }
   if (!session) return <><SignInScreen /><AboutModal /></>;
   // Signed in, but no archive yet — first run.
   if (!session.treeId) return <><CreateTreeScreen /><AboutModal /></>;
 
   const isMobile = winW < 640;
+  const touch = window.matchMedia('(pointer: coarse)').matches;
   const gutter = isMobile ? 12 : 20;
 
   return (
     <div style={{
       fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-      color: '#1C1917', height: '100vh',
+      color: '#1C1917', height: '100dvh',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F7F5F2',
     }}>
       {isMobile ? <MobileHeader /> : <AppHeader />}
@@ -118,7 +119,9 @@ function App() {
           </span>
           {!isMobile && (
             <span style={{ fontSize: 11.5, color: '#A8A29E', whiteSpace: 'nowrap' }}>
-              Click a connecting line to highlight that branch · Ctrl + scroll to zoom
+              {touch
+                ? 'Tap a connecting line to highlight that branch · Pinch to zoom'
+                : 'Click a connecting line to highlight that branch · Ctrl + scroll to zoom'}
             </span>
           )}
         </div>

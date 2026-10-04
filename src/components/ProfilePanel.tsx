@@ -13,6 +13,7 @@ type Data = { persons: Person[]; unions: Union[] };
 export function ProfilePanel() {
   const store = useTreeStore();
   const { panel, panelTab, panelMode, persons, unions } = store;
+  const isMobile = store.winW < 640;
 
   if (!panel) return null;
 
@@ -23,14 +24,17 @@ export function ProfilePanel() {
   const isDrawer = panelMode === 'drawer';
 
   // Panel positioning
-  const panelStyle: React.CSSProperties = isDrawer
+  // Phones get the whole screen: a floating box there only wasted space.
+  const panelStyle: React.CSSProperties = isMobile
+    ? { position: 'absolute', inset: 0, borderRadius: 0 }
+    : isDrawer
     ? { position: 'absolute', top: 0, bottom: 0, right: 0, left: 'auto', width: 540, borderRadius: '20px 0 0 20px' }
-    : { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(880px, 96vw)', maxHeight: '90vh', borderRadius: 20 };
+    : { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(880px, 96vw)', maxHeight: '90dvh', borderRadius: 20 };
 
   const tabs = [
-    { key: 'archives' as const, label: 'Historical Archives', count: person.archives.length },
-    { key: 'family' as const, label: 'Direct Family Line', count: null },
-    { key: 'bio' as const, label: 'Biography & Media', count: person.media.length + (person.bio ? 1 : 0) },
+    { key: 'archives' as const, label: isMobile ? 'Archives' : 'Historical Archives', count: person.archives.length },
+    { key: 'family' as const, label: isMobile ? 'Family' : 'Direct Family Line', count: null },
+    { key: 'bio' as const, label: isMobile ? 'Bio & Media' : 'Biography & Media', count: person.media.length + (person.bio ? 1 : 0) },
   ];
 
   return (
@@ -56,12 +60,14 @@ export function ProfilePanel() {
         {/* Header */}
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '13px 20px', borderBottom: '1px solid #EFE9E2' }}>
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.14em', color: '#A8A29E' }}>ANCESTRY RECORD</span>
-          <button type="button" onClick={store.togglePanelMode} aria-label="Switch presentation" style={iconBtn}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-              <path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5" />
-            </svg>
-          </button>
-          <button type="button" onClick={store.closePanel} aria-label="Close" style={iconBtn}>
+          {!isMobile && (
+            <button type="button" onClick={store.togglePanelMode} aria-label="Switch presentation" style={iconBtn}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                <path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5" />
+              </svg>
+            </button>
+          )}
+          <button type="button" onClick={store.closePanel} aria-label="Close" style={isMobile ? { ...iconBtn, width: 38, height: 38 } : iconBtn}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
@@ -74,7 +80,7 @@ export function ProfilePanel() {
 
           {/* Tabs */}
           <div style={{
-            display: 'flex', gap: 4, padding: '0 20px', borderBottom: '1px solid #EFE9E2',
+            display: 'flex', gap: 4, padding: isMobile ? '0 8px' : '0 20px', borderBottom: '1px solid #EFE9E2',
             position: 'sticky', top: 0, background: '#FFFDFB', zIndex: 2, overflowX: 'auto',
           }}>
             {tabs.map(tb => (
@@ -83,7 +89,8 @@ export function ProfilePanel() {
                 type="button"
                 onClick={() => store.setPanelTab(tb.key)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 7, padding: '13px 12px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  padding: isMobile ? '13px 6px' : '13px 12px', flex: isMobile ? 1 : undefined, fontFamily: 'inherit',
                   border: 'none', borderBottom: `2px solid ${panelTab === tb.key ? '#C2410C' : 'transparent'}`,
                   background: 'none', cursor: 'pointer',
                   fontSize: 12.5, fontWeight: 700,
@@ -537,7 +544,8 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
   const addMediaPhotos = useTreeStore(s => s.addMediaPhotos);
   const mediaUpload = useTreeStore(s => s.mediaUpload);
   const mediaRef = useRef<HTMLInputElement>(null);
-  const tileCols = panelMode === 'modal' ? 4 : 2;
+  const winW = useTreeStore(s => s.winW);
+  const tileCols = panelMode === 'modal' && winW >= 640 ? 4 : 2;
 
   // Timeline
   const timelineItems: Array<{ date: string; dot: string; title: string; sub: string }> = [];

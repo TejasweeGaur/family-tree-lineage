@@ -58,7 +58,7 @@ export function InviteModal() {
         aria-label="Family access"
         onClick={e => e.stopPropagation()}
         style={{
-          width: 'min(520px, 96vw)', maxHeight: '92vh', overflowY: 'auto', background: '#FFFDFB', borderRadius: 20,
+          width: 'min(520px, 96vw)', maxHeight: '92dvh', overflowY: 'auto', background: '#FFFDFB', borderRadius: 20,
           boxShadow: '0 26px 60px rgba(28,25,23,.26)',
         }}
       >

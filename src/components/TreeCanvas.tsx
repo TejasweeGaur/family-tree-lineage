@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useMemo } from 'react';
+import { useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { useTreeStore } from '../store/useTreeStore';
 import { PersonCard } from './PersonCard';
 import { fullName, spousesOf, parentsOf, unionsOf, kin, branchSet } from '../utils/kinship';
@@ -42,23 +42,129 @@ export function TreeCanvas() {
 
   const vis = (id: string) => !matchSet || !!matchSet[id];
 
-  // Centre on first paint; on mobile start zoomed out on the root.
+  /**
+   * Zooming keeps one point of the tree under one point of the screen: the
+   * middle of the view for the buttons, the fingers for a pinch. Scaling from
+   * the top-left corner instead threw people somewhere else in the tree.
+   *
+   * The scroll can only be set once the canvas has its new size, so the
+   * target is parked here and applied after React re-renders.
+   */
+  const anchorRef = useRef<{ cx: number; cy: number; ax: number; ay: number } | null>(null);
+  const applyAnchor = useCallback(() => {
+    const el = scrollerRef.current;
+    const inner = el?.firstElementChild as HTMLElement | null;
+    const a = anchorRef.current;
+    if (!el || !inner || !a) return;
+    const z = useTreeStore.getState().zoom;
+    el.scrollLeft = a.cx * z + inner.offsetLeft - a.ax;
+    el.scrollTop = a.cy * z + inner.offsetTop - a.ay;
+  }, []);
+  useLayoutEffect(() => { applyAnchor(); anchorRef.current = null; }, [zoom, applyAnchor]);
+
+  /** Tree coordinates under a point of the view (relative to the scroller's corner). */
+  const treePoint = useCallback((ax: number, ay: number) => {
+    const el = scrollerRef.current!;
+    const inner = el.firstElementChild as HTMLElement;
+    const z = useTreeStore.getState().zoom;
+    return { cx: (el.scrollLeft + ax - inner.offsetLeft) / z, cy: (el.scrollTop + ay - inner.offsetTop) / z };
+  }, []);
+
+  /** Sets the zoom; applies the parked anchor now if the zoom didn't change (already at a limit). */
+  const zoomWithAnchor = useCallback((z: number) => {
+    const before = useTreeStore.getState().zoom;
+    setZoom(z);
+    if (useTreeStore.getState().zoom === before) { applyAnchor(); anchorRef.current = null; }
+  }, [setZoom, applyAnchor]);
+
+  const zoomAround = useCallback((z: number, ax?: number, ay?: number) => {
+    const el = scrollerRef.current;
+    if (!el) return setZoom(z);
+    const x = ax ?? el.clientWidth / 2;
+    const y = ay ?? el.clientHeight / 2;
+    anchorRef.current = { ...treePoint(x, y), ax: x, ay: y };
+    zoomWithAnchor(z);
+  }, [setZoom, treePoint, zoomWithAnchor]);
+
+  const fit = useCallback(() => {
+    const el = scrollerRef.current;
+    const { w, h } = useTreeStore.getState().getLayout();
+    if (!el || !w || !h) return;
+    anchorRef.current = { cx: w / 2, cy: h / 2, ax: el.clientWidth / 2, ay: el.clientHeight / 2 };
+    zoomWithAnchor(Math.min(el.clientWidth / w, el.clientHeight / h));
+  }, [zoomWithAnchor]);
+
+  // First paint: the founding couple, centred. On a phone, zoomed so the
+  // couple fits across the screen; pinch to zoom in from there.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    if (window.innerWidth < 640) setZoom(0.7);
+    const { nodes: ns } = useTreeStore.getState().getLayout();
+    if (!ns.length) return;
+    const topY = Math.min(...ns.map(n => n.y));
+    const top = ns.filter(n => n.y === topY);
+    const left = Math.min(...top.map(n => n.x));
+    const right = Math.max(...top.map(n => n.x)) + 280;
+    if (window.innerWidth < 640) {
+      setZoom(Math.max(0.5, Math.min(0.7, (el.clientWidth - 16) / (right - left))));
+    }
     const centre = () => {
-      const target = canvasW * useTreeStore.getState().zoom;
-      el.scrollLeft = Math.max(0, (target - el.clientWidth) / 2);
+      anchorRef.current = { cx: (left + right) / 2, cy: topY - 40, ax: el.clientWidth / 2, ay: 0 };
+      applyAnchor();
+      anchorRef.current = null;
     };
     centre();
     const t1 = setTimeout(centre, 60);
     const t2 = setTimeout(centre, 260);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-    // Intentionally first-paint only — re-centring on every layout change would
+    // Intentionally first-paint only: re-centring on every layout change would
     // fight the user's scrolling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Two-finger pinch zooms the tree, not the page. One finger still scrolls
+  // natively (touch-action below leaves panning to the browser).
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    let start: { d: number; z: number; cx: number; cy: number } | null = null;
+    const local = (t: TouchList) => {
+      const r = el.getBoundingClientRect();
+      return {
+        x: (t[0].clientX + t[1].clientX) / 2 - r.left,
+        y: (t[0].clientY + t[1].clientY) / 2 - r.top,
+        d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY),
+      };
+    };
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) { start = null; return; }
+      const m = local(e.touches);
+      start = { d: m.d, z: useTreeStore.getState().zoom, ...treePoint(m.x, m.y) };
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!start || e.touches.length !== 2) return;
+      e.preventDefault();
+      const m = local(e.touches);
+      // The pinched point follows the fingers, so a pinch can also pan.
+      anchorRef.current = { cx: start.cx, cy: start.cy, ax: m.x, ay: m.y };
+      zoomWithAnchor(start.z * (m.d / start.d));
+    };
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) start = null; };
+    // iOS Safari's own page-zoom gesture.
+    const noGesture = (e: Event) => e.preventDefault();
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    el.addEventListener('gesturestart', noGesture);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('gesturestart', noGesture);
+    };
+  }, [treePoint, zoomWithAnchor]);
 
   // Pull a searched-for person into the middle of the viewport.
   useEffect(() => {
@@ -78,17 +184,20 @@ export function TreeCanvas() {
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
+    // Trackpad pinches arrive as ctrl + wheel too. Zooms around the pointer.
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      setZoom(useTreeStore.getState().zoom + (e.deltaY < 0 ? 0.08 : -0.08));
+      const r = el.getBoundingClientRect();
+      zoomAround(useTreeStore.getState().zoom + (e.deltaY < 0 ? 0.08 : -0.08), e.clientX - r.left, e.clientY - r.top);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [setZoom]);
+  }, [zoomAround]);
 
-  const onPanStart = useCallback((e: React.MouseEvent) => {
-    if (mode !== 'drag' || !scrollerRef.current) return;
+  // Mouse only: fingers already scroll the canvas natively.
+  const onPanStart = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || mode !== 'drag' || !scrollerRef.current) return;
     e.preventDefault();
     const el = scrollerRef.current;
     const sx = e.clientX, sy = e.clientY, l = el.scrollLeft, t = el.scrollTop;
@@ -105,12 +214,18 @@ export function TreeCanvas() {
   }, [mode]);
 
   return (
+    <>
     <div
       ref={scrollerRef}
       className="canvas-bg"
       data-tour="canvas"
-      style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', cursor: mode === 'drag' ? 'grab' : 'default' }}
-      onMouseDown={onPanStart}
+      style={{
+        position: 'absolute', inset: 0, overflow: 'auto', display: 'flex',
+        cursor: mode === 'drag' ? 'grab' : 'default',
+        // The browser pans; pinches are handled above rather than zooming the page.
+        touchAction: 'pan-x pan-y', overscrollBehavior: 'contain',
+      }}
+      onPointerDown={onPanStart}
       onClick={() => { setFocus(null); setBranch(null); closeAllMenus(); }}
     >
       {/*
@@ -238,31 +353,25 @@ export function TreeCanvas() {
         </div>
       </div>
 
-      <CanvasControls compact={winW < 640} />
     </div>
+    {/* Outside the scroller, so it neither scrolls away nor sits on the footer. */}
+    <CanvasControls compact={winW < 640} zoom={zoom} onZoom={zoomAround} onFit={fit} />
+    </>
   );
 }
 
-function CanvasControls({ compact }: { compact: boolean }) {
-  const zoom = useTreeStore(s => s.zoom);
+function CanvasControls({ compact, zoom, onZoom, onFit }: {
+  compact: boolean; zoom: number; onZoom: (z: number) => void; onFit: () => void;
+}) {
   const mode = useTreeStore(s => s.mode);
-  const setZoom = useTreeStore(s => s.setZoom);
   const setMode = useTreeStore(s => s.setMode);
-  const getLayout = useTreeStore(s => s.getLayout);
-
-  const fit = () => {
-    const { w, h } = getLayout();
-    const el = document.querySelector('.canvas-bg') as HTMLElement | null;
-    if (!el || !w || !h) return setZoom(1);
-    setZoom(Math.min(el.clientWidth / w, el.clientHeight / h));
-  };
 
   return (
     <div
       onClick={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
       style={{
-        position: 'fixed', right: 20, bottom: 20, zIndex: 20,
+        position: 'absolute', right: compact ? 12 : 20, bottom: compact ? 12 : 20, zIndex: 20,
         background: '#FFFDFB', border: '1px solid #E7E2DC',
         borderRadius: 16, boxShadow: '0 10px 30px rgba(28,25,23,.1)',
         padding: 9, display: 'flex', alignItems: 'center', gap: 9,
@@ -286,16 +395,16 @@ function CanvasControls({ compact }: { compact: boolean }) {
           <div style={{ width: 1, height: 22, background: '#EFE9E2' }} />
         </>
       )}
-      <button type="button" onClick={() => setZoom(zoom - 0.1)} aria-label="Zoom out" style={zoomBtn}>
+      <button type="button" onClick={() => onZoom(zoom - 0.1)} aria-label="Zoom out" style={zoomBtn}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M5 12h14" /></svg>
       </button>
       <span style={{ fontSize: 12, fontWeight: 800, minWidth: 42, textAlign: 'center', color: '#44403C' }}>
         {Math.round(zoom * 100)}%
       </span>
-      <button type="button" onClick={() => setZoom(zoom + 0.1)} aria-label="Zoom in" style={zoomBtn}>
+      <button type="button" onClick={() => onZoom(zoom + 0.1)} aria-label="Zoom in" style={zoomBtn}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
       </button>
-      <button type="button" onClick={fit} style={{ ...zoomBtn, width: 'auto', padding: '7px 11px', gap: 6, fontSize: 11.5, fontWeight: 700 }}>
+      <button type="button" onClick={onFit} style={{ ...zoomBtn, width: 'auto', padding: '7px 11px', gap: 6, fontSize: 11.5, fontWeight: 700 }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
         Fit
       </button>
