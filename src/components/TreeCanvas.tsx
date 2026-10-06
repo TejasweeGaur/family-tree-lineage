@@ -195,22 +195,59 @@ export function TreeCanvas() {
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoomAround]);
 
-  // Mouse only: fingers already scroll the canvas natively.
+  /**
+   * Mouse only: fingers already scroll the canvas natively.
+   *
+   * Pointer events from start to finish, and no preventDefault on pointerdown:
+   * that suppresses the browser's mousedown/mouseup, so a drag listening for
+   * mouseup never ended and the menus' click-outside handlers went deaf.
+   * Panning starts only after a few pixels of movement, so a plain click on a
+   * card is still a click; after a real drag, the click it ends with is eaten
+   * so letting go over a card doesn't open it.
+   */
   const onPanStart = useCallback((e: React.PointerEvent) => {
     if (e.pointerType !== 'mouse' || e.button !== 0 || mode !== 'drag' || !scrollerRef.current) return;
-    e.preventDefault();
     const el = scrollerRef.current;
+    const id = e.pointerId;
     const sx = e.clientX, sy = e.clientY, l = el.scrollLeft, t = el.scrollTop;
-    const move = (ev: MouseEvent) => {
-      el.scrollLeft = l - (ev.clientX - sx);
-      el.scrollTop = t - (ev.clientY - sy);
+    let panning = false;
+
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return;
+      // The button was let go somewhere the up event never reached us.
+      if (!(ev.buttons & 1)) { end(); return; }
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (!panning) {
+        if (Math.hypot(dx, dy) < 5) return;
+        panning = true;
+        el.style.cursor = 'grabbing';
+        window.getSelection()?.removeAllRanges();
+      }
+      el.scrollLeft = l - dx;
+      el.scrollTop = t - dy;
     };
-    const up = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
+    const noSelect = (ev: Event) => ev.preventDefault();
+    const eatClick = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', end);
+      window.removeEventListener('blur', end);
+      document.removeEventListener('selectstart', noSelect);
+      el.style.cursor = '';
+      if (panning) {
+        window.addEventListener('click', eatClick, { capture: true, once: true });
+        // If no click follows (released off the canvas), don't eat a later one.
+        setTimeout(() => window.removeEventListener('click', eatClick, { capture: true }), 0);
+      }
     };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    const up = (ev: PointerEvent) => { if (ev.pointerId === id) end(); };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', end);
+    window.addEventListener('blur', end);
+    document.addEventListener('selectstart', noSelect);
   }, [mode]);
 
   return (
