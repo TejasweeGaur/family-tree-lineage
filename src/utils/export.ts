@@ -2,7 +2,7 @@ import type { Person, Union } from '../types';
 import { spousesOf, parentsOf, unionsOf, fullName, initials } from './kinship';
 import { computeLayout } from './layout';
 import { palette } from './palette';
-import { lifeDates } from './dates';
+import { lifeDates, shortDate } from './dates';
 import { treeTitle } from './treeTitle';
 
 interface TreeData { persons: Person[]; unions: Union[]; }
@@ -33,7 +33,7 @@ export function exportRows(data: TreeData): Row[] {
         name: fullName(p),
         gender: p.gender,
         relation: p.label,
-        dob: p.dob, pob: p.pob, dod: p.dod, pod: p.pod,
+        dob: shortDate(p.dob), pob: p.pob, dod: shortDate(p.dod), pod: p.pod,
         occupation: p.occupation, residency: p.residency,
         gotra: p.gotra, shasan: p.shasan,
         // "Graduate, Computer Science, Delhi University (2010); …"

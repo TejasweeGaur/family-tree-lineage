@@ -1,5 +1,4 @@
 const MONTHS_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 export function year(d: string): string {
   return d ? String(d).slice(0, 4) : '';
@@ -13,13 +12,18 @@ export function fmtDate(d: string): string {
   return (dd ? String(Number(dd)) + ' ' : '') + (MONTHS_LONG[Number(m) - 1] || '') + ' ' + y;
 }
 
-/** `16 Oct 1963`, `Oct 1963` or `1963`, depending on how much of the date is known. */
+/**
+ * `16/10/1963`, `10/1963` or `1963`, depending on how much of the date is
+ * known. Day first, the way the family reads and writes dates.
+ */
 export function shortDate(d: string): string {
   if (!d) return '';
-  const [y, m, dd] = d.split('-');
-  const month = m ? MONTHS_SHORT[Number(m) - 1] : '';
-  if (!month) return y;
-  return dd ? `${Number(dd)} ${month} ${y}` : `${month} ${y}`;
+  const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/.exec(d);
+  if (!m) return d;
+  const [, y, mo, dd] = m;
+  if (dd) return `${dd}/${mo}/${y}`;
+  if (mo) return `${mo}/${y}`;
+  return y;
 }
 
 // ---------------------------------------------------------------- entry
@@ -27,25 +31,20 @@ export function shortDate(d: string): string {
 /**
  * Stored dates are ISO and may be partial: `1963-10-16`, `1963-10` or `1963`,
  * since families often know only the month or the year. People type them as
- * mm/dd/yyyy, mm/yyyy or yyyy; these convert between the two.
+ * dd/mm/yyyy, mm/yyyy or yyyy; these convert between the two.
  */
 export function toEntryText(iso: string): string {
-  const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/.exec(iso);
-  if (!m) return iso; // something older or hand-typed: shown as it is
-  const [, y, mo, d] = m;
-  if (d) return `${mo}/${d}/${y}`;
-  if (mo) return `${mo}/${y}`;
-  return y;
+  return shortDate(iso);
 }
 
 export type ParsedDate = { iso: string } | { error: string };
 
-export const DATE_FORMAT_HINT = 'Use mm/dd/yyyy, mm/yyyy or yyyy';
+export const DATE_FORMAT_HINT = 'Use dd/mm/yyyy, mm/yyyy or yyyy';
 
 export function parseEntryText(text: string, opts: { noFuture?: boolean } = {}): ParsedDate {
   const t = text.trim();
   if (!t) return { iso: '' };
-  // Accept any separator, so 10-16-1963 and 10.16.1963 work as well.
+  // Accept any separator, so 16-10-1963 and 16.10.1963 work as well.
   const parts = t.split(/[^0-9]+/).filter(Boolean);
   let y: number, mo = 0, d = 0;
   if (parts.length === 1 && parts[0].length === 4) {
@@ -53,7 +52,7 @@ export function parseEntryText(text: string, opts: { noFuture?: boolean } = {}):
   } else if (parts.length === 2 && parts[1].length === 4) {
     mo = Number(parts[0]); y = Number(parts[1]);
   } else if (parts.length === 3 && parts[2].length === 4) {
-    mo = Number(parts[0]); d = Number(parts[1]); y = Number(parts[2]);
+    d = Number(parts[0]); mo = Number(parts[1]); y = Number(parts[2]);
   } else if (parts.length === 3 && parts[0].length === 4) {
     // Pasted ISO, yyyy-mm-dd.
     y = Number(parts[0]); mo = Number(parts[1]); d = Number(parts[2]);
@@ -109,4 +108,23 @@ export function ageLabel(dob: string, dod: string): string {
 export function mdate(date: string): string {
   if (!date) return '';
   return 'm. ' + date;
+}
+
+/**
+ * Whole years between birth and death (or today). Null when the birth year
+ * isn't known; a partial date counts from the start of its month or year.
+ */
+export function ageYears(dob: string, dod: string): number | null {
+  const b = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(dob);
+  if (!b) return null;
+  const end = dod ? /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(dod) : null;
+  if (dod && !end) return null;
+  const now = new Date();
+  const [ey, em, ed] = end
+    ? [Number(end[1]), Number(end[2] || 12), Number(end[3] || 31)]
+    : [now.getFullYear(), now.getMonth() + 1, now.getDate()];
+  const [by, bm, bd] = [Number(b[1]), Number(b[2] || 1), Number(b[3] || 1)];
+  let age = ey - by;
+  if (em < bm || (em === bm && ed < bd)) age -= 1;
+  return age >= 0 ? age : null;
 }

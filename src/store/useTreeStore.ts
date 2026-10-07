@@ -316,6 +316,9 @@ type Store = AppState & {
 
   setHeaderQ: (q: string) => void;
   setDirSort: (k: DirSortKey) => void;
+  /** Directory: everyone, or only the direct line (the default). */
+  dirShowAll: boolean;
+  setDirShowAll: (v: boolean) => void;
   setKinTarget: (id: string) => void;
   setNotice: (msg: string) => void;
   setWinW: (w: number) => void;
@@ -353,7 +356,7 @@ export const useTreeStore = create<Store>((set, get) => ({
   focus: null,
   branch: null,
   panel: null,
-  panelTab: 'archives',
+  panelTab: 'family',
   panelMode: 'modal',
   revealTarget: null,
 
@@ -574,7 +577,7 @@ export const useTreeStore = create<Store>((set, get) => ({
   setBranch: uid => set(s => ({ branch: s.branch === uid ? null : uid })),
   consumeReveal: () => set({ revealTarget: null }),
 
-  openPanel: (id, tab = 'archives') => set({
+  openPanel: (id, tab = 'family') => set({
     panel: id, focus: id, panelTab: tab, plusMenu: null,
     headerQ: '', searchOpen: false,
   }),
@@ -1525,6 +1528,8 @@ export const useTreeStore = create<Store>((set, get) => ({
 
   setHeaderQ: q => set({ headerQ: q }),
   setDirSort: k => set(s => s.dirSort === k ? { dirSortAsc: !s.dirSortAsc } : { dirSort: k, dirSortAsc: true }),
+  dirShowAll: false,
+  setDirShowAll: v => set({ dirShowAll: v }),
   setKinTarget: id => set({ kinTarget: id }),
   setNotice: msg => set({ notice: msg }),
   setWinW: w => set({ winW: w }),

@@ -78,7 +78,20 @@ export function computeLayout(
 
   const rootId = getRoot(data);
   if (!rootId) return { nodes: [], links: [], hits: [], conns: [], pills: [], extras: [], w: 0, h: 0 };
-  measure(rootId);
+
+  // The founder's brothers and sisters, recorded without parents, share a
+  // partnerless union with them. They're drawn side by side along the top,
+  // joined by a sibling bar, each with their own family below.
+  const siblingUnion = data.unions.find(u => !u.a && !u.b && u.children.includes(rootId));
+  const top = siblingUnion
+    ? [...siblingUnion.children].sort((a, b) => {
+        const pa = data.persons.find(p => p.id === a), pb = data.persons.find(p => p.id === b);
+        return String(pa?.dob || '').localeCompare(String(pb?.dob || ''));
+      }).filter(id => data.persons.some(p => p.id === id))
+    : [rootId];
+  top.forEach(measure);
+  // Room above the top row for the sibling bar.
+  const TOP_Y = top.length > 1 ? PAD + 46 : PAD;
 
   const nodes: LayoutNode[] = [];
   const links: LayoutLink[] = [];
@@ -193,7 +206,24 @@ export function computeLayout(
     });
   };
 
-  place(rootId, PAD, PAD);
+  let tx = PAD;
+  const topCentres: number[] = [];
+  top.forEach(id => {
+    const d = W[id];
+    place(id, tx, TOP_Y);
+    topCentres.push(tx + (d.w - d.unitW) / 2 + CW / 2);
+    tx += d.w + SIB;
+  });
+  if (top.length > 1) {
+    const barY = TOP_Y - 30;
+    const first = topCentres[0], last = topCentres[topCentres.length - 1];
+    const hl = !!(focus && top.includes(focus));
+    links.push({ uid: siblingUnion!.id, d: `M${first} ${barY} H${last}`, stroke: hl ? ACC : LINE, w: hl ? 2.5 : 2, hidden: false });
+    topCentres.forEach((x, i) => links.push({
+      uid: siblingUnion!.id, d: `M${x} ${barY} V${TOP_Y}`,
+      stroke: hl ? ACC : LINE, w: hl ? 2.5 : 2, hidden: !vis(top[i]),
+    }));
+  }
 
   let maxX = 0, maxY = 0;
   nodes.forEach(n => { maxX = Math.max(maxX, n.x + CW); maxY = Math.max(maxY, n.y + CH); });

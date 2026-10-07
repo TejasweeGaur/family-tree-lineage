@@ -55,8 +55,6 @@ export function PlusMenu() {
   const parents = parentsOf(data, plusMenu);
   const hasFather = parents.some(id => persons.find(p => p.id === id)?.gender === 'Male');
   const hasMother = parents.some(id => persons.find(p => p.id === id)?.gender === 'Female');
-  const hasParentUnion = unions.some(u => u.children.includes(plusMenu));
-  const noParent = hasParentUnion ? undefined : 'Add a parent first';
 
   const groups: Group[] = [
     { title: 'SPOUSE', items: [{ label: 'Wife' }, { label: 'Husband' }] },
@@ -71,8 +69,10 @@ export function PlusMenu() {
     {
       title: 'SIBLINGS',
       items: [
-        { label: 'Brother', disabled: noParent },
-        { label: 'Sister', disabled: noParent },
+        // Allowed without recorded parents: they share an empty parent slot,
+        // which adding a father or mother later fills in.
+        { label: 'Brother' },
+        { label: 'Sister' },
       ],
     },
   ];

@@ -25,13 +25,11 @@ export function AddMemberDialog() {
   const parents = anchor ? parentsOf(data, anchor.id) : [];
   const hasFather = parents.some(id => persons.find(p => p.id === id)?.gender === 'Male');
   const hasMother = parents.some(id => persons.find(p => p.id === id)?.gender === 'Female');
-  const hasParentUnion = anchor ? unions.some(u => u.children.includes(anchor.id)) : false;
 
   /** Same gating as the card's add-relative menu, kept in one place. */
   function disabledReason(kind: RelativeKind): string {
     if (kind === 'Father' && hasFather) return 'Father already recorded';
     if (kind === 'Mother' && hasMother) return 'Mother already recorded';
-    if ((kind === 'Brother' || kind === 'Sister') && !hasParentUnion) return 'Add a parent first';
     return '';
   }
 

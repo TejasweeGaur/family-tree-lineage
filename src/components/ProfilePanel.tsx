@@ -32,9 +32,9 @@ export function ProfilePanel() {
     : { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(880px, 96vw)', maxHeight: '90dvh', borderRadius: 20 };
 
   const tabs = [
-    { key: 'archives' as const, label: isMobile ? 'Archives' : 'Historical Archives', count: person.archives.length },
     { key: 'family' as const, label: isMobile ? 'Family' : 'Direct Family Line', count: null },
     { key: 'bio' as const, label: isMobile ? 'Bio & Media' : 'Biography & Media', count: person.media.length + (person.bio ? 1 : 0) },
+    { key: 'archives' as const, label: isMobile ? 'Archives' : 'Historical Archives', count: person.archives.length },
   ];
 
   return (
@@ -116,7 +116,7 @@ export function ProfilePanel() {
           {/* Tab content */}
           {panelTab === 'archives' && <ArchivesTab person={person} />}
           {panelTab === 'family' && <FamilyTab person={person} data={data} />}
-          {panelTab === 'bio' && <BioTab person={person} data={data} />}
+          {panelTab === 'bio' && <BioTab person={person} />}
         </div>
       </div>
     </div>
@@ -425,7 +425,11 @@ function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]
   return (
     <div style={{ padding: '20px 24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
       {/* Parents */}
-      <SectionHeader label="PARENTS" actionLabel={admin ? '+ Add Parent' : undefined} onAction={() => openAdd(person.id, 'Father')} />
+      <SectionHeader
+        label="PARENTS"
+        actionLabel={admin && !(father && mother) ? '+ Add Parent' : undefined}
+        onAction={() => openAdd(person.id, father ? 'Mother' : 'Father')}
+      />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: -14 }}>
         {father
           ? <MiniCard person={father} onClick={() => openPanel(father.id)} />
@@ -490,15 +494,14 @@ function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]
         </div>
       </div>
 
-      {/* Siblings */}
-      {siblings.length > 0 && (
-        <div>
-          <SectionHeader label="SIBLINGS" />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 9, marginTop: 10 }}>
-            {siblings.map(s => <MiniCard key={s.id} person={s} onClick={() => openPanel(s.id)} />)}
-          </div>
+      {/* Siblings — addable even when the parents aren't recorded */}
+      <div>
+        <SectionHeader label={`SIBLINGS (${siblings.length})`} actionLabel={admin ? '+ Add Sibling' : undefined} onAction={() => openAdd(person.id, 'Brother')} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 9, marginTop: 10 }}>
+          {siblings.length === 0 && <EmptyCard label="No siblings recorded" />}
+          {siblings.map(s => <MiniCard key={s.id} person={s} onClick={() => openPanel(s.id)} />)}
         </div>
-      )}
+      </div>
 
       {/* Children */}
       <div>
@@ -532,11 +535,61 @@ function FamilyTab({ person, data }: { person: Person; data: { persons: Person[]
           </div>
         )}
       </div>
+
+      <Milestones person={person} data={data} />
     </div>
   );
 }
 
-function BioTab({ person, data }: { person: Person; data: { persons: Person[]; unions: any[] } }) {
+/** The person's life in date order: births, marriages, children, education, records. */
+function Milestones({ person, data }: { person: Person; data: { persons: Person[]; unions: any[] } }) {
+  const items: Array<{ date: string; dot: string; title: string; sub: string }> = [];
+  if (person.dob) items.push({ date: person.dob, dot: '#C2410C', title: 'Born', sub: fmtDate(person.dob) + (person.pob ? ` · ${person.pob}` : '') });
+  unionsOf(data, person.id).forEach(u => {
+    const sp = u.a === person.id ? data.persons.find(p => p.id === u.b) : data.persons.find(p => p.id === u.a);
+    if (u.date) items.push({ date: u.date, dot: '#DB2777', title: `Married ${sp ? fullName(sp) : ''}`, sub: fmtDate(u.date) + (u.place ? ` · ${u.place}` : '') });
+    u.children.forEach((cid: string) => {
+      const ch = data.persons.find(p => p.id === cid);
+      if (ch?.dob) items.push({ date: ch.dob, dot: '#38BDF8', title: `Birth of ${fullName(ch)}`, sub: fmtDate(ch.dob) + (ch.pob ? ` · ${ch.pob}` : '') });
+    });
+  });
+  person.archives.forEach(a => {
+    if (a.year) items.push({ date: a.year, dot: '#F59E0B', title: a.title, sub: a.category + (a.origin ? ` · ${a.origin}` : '') });
+  });
+  person.education.forEach(e => {
+    if (e.year) items.push({ date: e.year, dot: '#16A34A', title: `Completed ${[e.level, e.branch].filter(Boolean).join(', ') || 'education'}`, sub: e.institution });
+  });
+  if (person.dod) items.push({ date: person.dod, dot: '#1C1917', title: 'Passed away', sub: fmtDate(person.dod) + (person.pod ? ` · ${person.pod}` : '') });
+  items.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E', marginBottom: 14 }}>LIFE MILESTONES CHRONOLOGY</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {items.map((e, i) => (
+          <div key={i} style={{ display: 'flex', gap: 14 }}>
+            <div style={{ flexShrink: 0, width: 46, textAlign: 'right', fontSize: 11.5, fontWeight: 800, color: '#A8A29E', paddingTop: 1 }}>
+              {e.date.slice(0, 4)}
+            </div>
+            <div style={{ flexShrink: 0, width: 12, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: e.dot, boxShadow: '0 0 0 3px #FFFDFB', marginTop: 4 }} />
+              {i < items.length - 1 && <span style={{ flex: 1, width: 2, background: '#EFE9E2' }} />}
+            </div>
+            <div style={{ flex: 1, paddingBottom: 16, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.35 }}>{e.title}</div>
+              <div style={{ fontSize: 11.5, color: '#8A817A', marginTop: 2 }}>{e.sub}</div>
+            </div>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <div style={{ color: '#A8A29E', fontSize: 13, fontStyle: 'italic', paddingLeft: 60 }}>No milestones recorded yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BioTab({ person }: { person: Person }) {
   const admin = useTreeStore(s => s.isAdmin());
   const openEdit = useTreeStore(s => s.openEdit);
   const openViewer = useTreeStore(s => s.openViewer);
@@ -546,26 +599,6 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
   const mediaRef = useRef<HTMLInputElement>(null);
   const winW = useTreeStore(s => s.winW);
   const tileCols = panelMode === 'modal' && winW >= 640 ? 4 : 2;
-
-  // Timeline
-  const timelineItems: Array<{ date: string; dot: string; title: string; sub: string }> = [];
-  if (person.dob) timelineItems.push({ date: person.dob, dot: '#C2410C', title: 'Born', sub: fmtDate(person.dob) + (person.pob ? ` · ${person.pob}` : '') });
-  unionsOf(data, person.id).forEach(u => {
-    const sp = u.a === person.id ? data.persons.find(p => p.id === u.b) : data.persons.find(p => p.id === u.a);
-    if (u.date) timelineItems.push({ date: u.date, dot: '#DB2777', title: `Married ${sp ? fullName(sp) : ''}`, sub: fmtDate(u.date) + (u.place ? ` · ${u.place}` : '') });
-    u.children.forEach(cid => {
-      const ch = data.persons.find(p => p.id === cid);
-      if (ch?.dob) timelineItems.push({ date: ch.dob, dot: '#38BDF8', title: `Birth of ${fullName(ch)}`, sub: fmtDate(ch.dob) + (ch.pob ? ` · ${ch.pob}` : '') });
-    });
-  });
-  person.archives.forEach(a => {
-    if (a.year) timelineItems.push({ date: a.year, dot: '#F59E0B', title: a.title, sub: a.category + (a.origin ? ` · ${a.origin}` : '') });
-  });
-  person.education.forEach(e => {
-    if (e.year) timelineItems.push({ date: e.year, dot: '#16A34A', title: `Completed ${[e.level, e.branch].filter(Boolean).join(', ') || 'education'}`, sub: e.institution });
-  });
-  if (person.dod) timelineItems.push({ date: person.dod, dot: '#1C1917', title: 'Passed away', sub: fmtDate(person.dod) + (person.pod ? ` · ${person.pod}` : '') });
-  timelineItems.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
   const infoTiles = [
     { label: 'OCCUPATION / CAREER', value: person.occupation || '—' },
@@ -674,30 +707,6 @@ function BioTab({ person, data }: { person: Person; data: { persons: Person[]; u
         </div>
       )}
 
-      {/* Timeline */}
-      <div>
-        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A8A29E', marginBottom: 14 }}>LIFE MILESTONES CHRONOLOGY</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {timelineItems.map((e, i) => (
-            <div key={i} style={{ display: 'flex', gap: 14 }}>
-              <div style={{ flexShrink: 0, width: 46, textAlign: 'right', fontSize: 11.5, fontWeight: 800, color: '#A8A29E', paddingTop: 1 }}>
-                {e.date.slice(0, 4)}
-              </div>
-              <div style={{ flexShrink: 0, width: 12, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', background: e.dot, boxShadow: '0 0 0 3px #FFFDFB', marginTop: 4 }} />
-                {i < timelineItems.length - 1 && <span style={{ flex: 1, width: 2, background: '#EFE9E2' }} />}
-              </div>
-              <div style={{ flex: 1, paddingBottom: 16, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.35 }}>{e.title}</div>
-                <div style={{ fontSize: 11.5, color: '#8A817A', marginTop: 2 }}>{e.sub}</div>
-              </div>
-            </div>
-          ))}
-          {timelineItems.length === 0 && (
-            <div style={{ color: '#A8A29E', fontSize: 13, fontStyle: 'italic', paddingLeft: 60 }}>No milestones recorded yet.</div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

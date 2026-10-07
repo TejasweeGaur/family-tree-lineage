@@ -14,7 +14,7 @@ interface Props {
 }
 
 /**
- * A date that can be typed (mm/dd/yyyy, mm/yyyy or just yyyy, for ancestors
+ * A date that can be typed (dd/mm/yyyy, mm/yyyy or just yyyy, for ancestors
  * whose exact date is lost) or picked from the browser's own calendar.
  */
 export function DateField({ label, value, onChange, onValidity, noFuture, amber }: Props) {
@@ -61,7 +61,7 @@ export function DateField({ label, value, onChange, onValidity, noFuture, amber 
           id={id}
           type="text"
           value={draft ?? toEntryText(value)}
-          placeholder="mm/dd/yyyy"
+          placeholder="dd/mm/yyyy"
           autoComplete="off"
           aria-invalid={!!error}
           aria-describedby={`${id}-hint`}

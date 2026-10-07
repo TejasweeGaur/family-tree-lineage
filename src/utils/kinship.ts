@@ -221,3 +221,28 @@ export function cardName(p: Person): string {
   const middle = p.middle.split(/\s+/).map(w => `${w[0]}.`).join(' ');
   return [p.first, middle, p.last].filter(Boolean).join(' ');
 }
+
+/**
+ * The family line by blood, traced through the sons: the founder (and any
+ * brothers and sisters recorded with them), their children, and the children
+ * of every son after that. Daughters are part of the line; their children
+ * belong to their husbands' families. Nobody who married in is included.
+ */
+export function directLineage(data: TreeData): Set<string> {
+  const root = getRoot(data);
+  const line = new Set<string>();
+  if (!root) return line;
+  const founders = data.unions.find(u => !u.a && !u.b && u.children.includes(root))?.children ?? [root];
+  const queue = [...founders];
+  founders.forEach(id => line.add(id));
+  while (queue.length) {
+    const id = queue.shift()!;
+    const p = byId(data, id);
+    // The founders' children always count, whoever the founder is.
+    if (!founders.includes(id) && p?.gender === 'Female') continue;
+    childrenOf(data, id).forEach(c => {
+      if (!line.has(c)) { line.add(c); queue.push(c); }
+    });
+  }
+  return line;
+}
